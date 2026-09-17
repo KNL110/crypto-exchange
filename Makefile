@@ -1,10 +1,10 @@
 .PHONY: build
 
 build:
-	go build -o ./bin/exchange ./cmd/exchange
+	@go build -o ./bin/exchange ./cmd
 
 run: build
-	./bin/exchange
+	@./bin/exchange
 
 test:
-	go test -v ./...
+	@go test -v ./...

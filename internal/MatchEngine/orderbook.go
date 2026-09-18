@@ -2,9 +2,13 @@ package matchengine
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
+
+type Orders []*Order
+type Limits []*Limit
 //---------------------------------------------------------------------------------------------------
 
 // Order represents a single buy or sell order resting at a price level.
@@ -27,16 +31,27 @@ func (order *Order) String() string {
 	return fmt.Sprintf("Order[size: %.2f , isBid: %t]", order.Size, order.IsBid)
 }
 
+func (ord Orders) Len() int {
+	return len(ord)
+}
+
+func (ord Orders) Swap(i,j int){
+	ord[i],ord[j] = ord[j],ord[i]
+}
+
+func (ord Orders) Less(i,j int) bool{
+	return ord[i].Timestamp < ord[j].Timestamp
+}
+
 //---------------------------------------------------------------------------------------------------
 
 // Limit represents a single price level and the orders resting at it.
 type Limit struct {
 	Price       float64
-	Orders      []*Order
+	Orders
 	TotalVolume float64
 }
 
-type Limits []*Limit
 
 func (lims Limits) Len() int {
 	return len(lims)
@@ -50,7 +65,7 @@ type BybestAsk struct{
 	Limits
 }
 
-func (a BybestAsk) Compare(i,j int) bool{
+func (a BybestAsk) Less(i,j int) bool{
 	return a.Limits[i].Price < a.Limits[j].Price
 }
 
@@ -58,7 +73,7 @@ type BybestBid struct{
 	Limits
 }
 
-func (b BybestBid) Compare(i,j int) bool{
+func (b BybestBid) Less(i,j int) bool{
 	return b.Limits[i].Price > b.Limits[j].Price
 }
 
@@ -93,7 +108,8 @@ func (lim *Limit) DeleteOrder(order *Order) {
 	order.Limit = nil //remove the limit reference form order since it no longer in limit
 	lim.TotalVolume -= order.Size
 
-	//TODO: if lim.Orders is empty, remove the limit from the order book,sort to maintain FIFO order, etc.
+	//sort to maintain FIFO order
+	sort.Sort(lim.Orders)
 }
 
 //----------------------------------------------------------------------------------------------------
@@ -109,16 +125,16 @@ type MatchedOrder struct {
 
 // OrderBook holds all price levels for both sides of the market.
 type OrderBook struct {
-	Asks      []*Limit
-	Bids      []*Limit
+	Asks      Limits
+	Bids      Limits
 	AskLimits map[float64]*Limit
 	BidLimits map[float64]*Limit
 }
 
 func NewOrderBook() *OrderBook {
 	return &OrderBook{
-		Asks:      []*Limit{},
-		Bids:      []*Limit{},
+		Asks:      Limits{},
+		Bids:      Limits{},
 		AskLimits: make(map[float64]*Limit),
 		BidLimits: make(map[float64]*Limit),
 	}

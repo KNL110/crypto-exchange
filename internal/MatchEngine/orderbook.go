@@ -1,6 +1,9 @@
 package matchengine
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 type MatchedOrder struct {
 	Ask        *Order
@@ -11,46 +14,43 @@ type MatchedOrder struct {
 
 // OrderBook holds all price levels for both sides of the market.
 type OrderBook struct {
-	Asks      Limits
-	Bids      Limits
+	asks      Limits
+	bids      Limits
 	AskLimits map[float64]*Limit
 	BidLimits map[float64]*Limit
 }
 
 func NewOrderBook() *OrderBook {
 	return &OrderBook{
-		Asks:      Limits{},
-		Bids:      Limits{},
+		asks:      Limits{},
+		bids:      Limits{},
 		AskLimits: make(map[float64]*Limit),
 		BidLimits: make(map[float64]*Limit),
 	}
 }
 
 func (ordBook *OrderBook) String() string {
-	return fmt.Sprintf("OrderBook[Asks: %v, Bids: %v]", ordBook.Asks, ordBook.Bids)
+	return fmt.Sprintf("OrderBook[Asks: %v, Bids: %v]", ordBook.asks, ordBook.bids)
 }
 
-// PlaceOrder matches the order against the book; if it is not fully
-// filled, the remainder is added to the book.
-func (ordBook *OrderBook) PlaceOrder(order *Order, price float64) []MatchedOrder {
-	//matching logic:
-
-	if order.Size > 0 {
-		ordBook.addOrder(order, price)
-	}
-
-	return []MatchedOrder{}
+func (ordBook *OrderBook) Asks() Limits {
+	sort.Sort(BybestAsk{ordBook.asks})
+	return ordBook.asks
 }
 
-// addOrder adds order to the matching limit, creating a new limit and
-// adding it to the book if one does not already exist at that price.
-func (ordBook *OrderBook) addOrder(order *Order, price float64) {
+func (ordBook *OrderBook) Bids() Limits {
+	sort.Sort(BybestBid{ordBook.bids})
+	return ordBook.bids
+}
+
+
+func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price float64) {
 	if order.IsBid {
 		lim, exists := ordBook.BidLimits[price]
 		if !exists {
 			lim = NewLimit(price)
 			ordBook.BidLimits[price] = lim
-			ordBook.Bids = append(ordBook.Bids, lim)
+			ordBook.bids = append(ordBook.bids, lim)
 		}
 		lim.AddOrder(order)
 	} else {
@@ -58,7 +58,7 @@ func (ordBook *OrderBook) addOrder(order *Order, price float64) {
 		if !exists {
 			lim = NewLimit(price)
 			ordBook.AskLimits[price] = lim
-			ordBook.Asks = append(ordBook.Asks, lim)
+			ordBook.asks = append(ordBook.asks, lim)
 		}
 		lim.AddOrder(order)
 	}

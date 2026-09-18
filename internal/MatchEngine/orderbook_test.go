@@ -2,19 +2,26 @@ package matchengine
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
-func TestOrderBook(t *testing.T) {
+func assert(t *testing.T, a,b any){
+	if !reflect.DeepEqual(a,b){
+		t.Errorf("%+v != %+v",a,b)
+	}
+}
+
+func TestPlaceLimitOrder(t *testing.T) {
 	ordBook := NewOrderBook()
 
-	buyOrderA := NewOrder(true, 10)
-	buyOrderB := NewOrder(true, 2000)
+	sellOrderA := NewOrder(false, 10)
+	sellOrderB := NewOrder(false, 5)
+	ordBook.PlaceLimitOrder(sellOrderA,10_000)
+	ordBook.PlaceLimitOrder(sellOrderB,8_000)
 
-	ordBook.PlaceOrder(buyOrderA, 10_000)
-	ordBook.PlaceOrder(buyOrderB, 19_000)
-
-	for i := 0; i < len(ordBook.Bids); i++ {
-		fmt.Println(ordBook.Bids[i])
+	assert(t,len(ordBook.asks),2)
+	for i := 0; i < len(ordBook.bids); i++ {
+		fmt.Println(ordBook.bids[i])
 	}
 }

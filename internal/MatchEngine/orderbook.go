@@ -36,6 +36,32 @@ type Limit struct {
 	TotalVolume float64
 }
 
+type Limits []*Limit
+
+func (lims Limits) Len() int {
+	return len(lims)
+}
+
+func (lims Limits) Swap(i,j int){
+	lims[i],lims[j] = lims[j],lims[i]
+}
+
+type BybestAsk struct{
+	Limits
+}
+
+func (a BybestAsk) Compare(i,j int) bool{
+	return a.Limits[i].Price < a.Limits[j].Price
+}
+
+type BybestBid struct{
+	Limits
+}
+
+func (b BybestBid) Compare(i,j int) bool{
+	return b.Limits[i].Price > b.Limits[j].Price
+}
+
 func NewLimit(price float64) *Limit {
 	return &Limit{
 		Price:  price,

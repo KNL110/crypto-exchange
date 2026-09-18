@@ -25,6 +25,10 @@ func (order *Order) String() string {
 	return fmt.Sprintf("Order[size: %.2f , isBid: %t]", order.Size, order.IsBid)
 }
 
+func (order *Order) IsFilled() bool {
+	return order.Size == 0
+}
+
 // Orders implements sort.Interface, ordering orders FIFO by arrival time.
 type Orders []*Order
 

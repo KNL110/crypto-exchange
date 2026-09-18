@@ -47,6 +47,46 @@ func (lim *Limit) DeleteOrder(order *Order) {
 	sort.Sort(lim.Orders)
 }
 
+func (lim *Limit) fillOrder(ord1,ord2 *Order) MatchedOrder {
+	var matched MatchedOrder
+
+	if ord1.IsBid {
+		matched.Bid = ord1
+		matched.Ask = ord2
+	} else {
+		matched.Bid = ord2
+		matched.Ask = ord1
+	}
+
+	if ord1.Size >= ord2.Size {
+		matched.SizeFilled = ord2.Size
+		matched.Price = lim.Price
+		ord1.Size -= ord2.Size
+		ord2.Size = 0
+	} else {
+		matched.SizeFilled = ord1.Size
+		matched.Price = lim.Price
+		ord2.Size -= ord1.Size
+		ord1.Size = 0
+	}
+
+	return matched
+}
+
+//TODO: check if the input order actually belongs to this limit before filling it. If not, return an error
+func (lim *Limit) FillOrder(order *Order) []MatchedOrder {
+	var matches []MatchedOrder
+
+	for _, o := range lim.Orders {
+		if order.IsFilled() {
+			break
+		}
+		matched := lim.fillOrder(order, o)
+		matches = append(matches, matched)
+	}
+
+	return matches
+}
 
 type Limits []*Limit
 

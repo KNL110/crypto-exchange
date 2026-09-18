@@ -5,13 +5,6 @@ import (
 	"sort"
 )
 
-type MatchedOrder struct {
-	Ask        *Order
-	Bid        *Order
-	SizeFilled float64
-	Price      float64
-}
-
 // OrderBook holds all price levels for both sides of the market.
 type OrderBook struct {
 	asks      Limits
@@ -41,6 +34,19 @@ func (ordBook *OrderBook) Asks() Limits {
 func (ordBook *OrderBook) Bids() Limits {
 	sort.Sort(BybestBid{ordBook.bids})
 	return ordBook.bids
+}
+
+
+func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
+	matches := []MatchedOrder{}
+
+	if order.IsBid {
+		for _, askLimit := range ordBook.Asks() {
+			matches = askLimit.FillOrder(order)
+		}
+	}
+	
+	return matches 
 }
 
 

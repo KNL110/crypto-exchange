@@ -36,17 +36,78 @@ func (ordBook *OrderBook) Bids() Limits {
 	return ordBook.bids
 }
 
+func (ordBook *OrderBook) DeleteLimit(lim *Limit, isBid bool) {
+	if isBid {
+		delete(ordBook.BidLimits, lim.Price)
+		for i, l := range ordBook.bids {
+			if l == lim {
+				ordBook.bids[i] = ordBook.bids[len(ordBook.bids)-1]
+				ordBook.bids = ordBook.bids[:len(ordBook.bids)-1]
+				break
+			}
+		}
+		ordBook.bids = ordBook.Bids() // re-sort bids after deletion
+	} else {
+		delete(ordBook.AskLimits, lim.Price)
+		for i, l := range ordBook.asks {
+			if l == lim {
+				ordBook.asks[i] = ordBook.asks[len(ordBook.asks)-1]
+				ordBook.asks = ordBook.asks[:len(ordBook.asks)-1]
+				break
+			}
+		}
+		ordBook.asks = ordBook.Asks() // re-sort asks after deletion
+	}
+}
+
+
+// clearEmptiedLimits removes drained limits from the book and re-sorts
+func (ordBook *OrderBook) clearEmptiedLimits(limits []*Limit, isBid bool) {
+	for _, lim := range limits {
+		ordBook.DeleteLimit(lim, isBid)
+	}
+}
 
 func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
 	matches := []MatchedOrder{}
+	emptied := Limits{}
 
 	if order.IsBid {
+		if order.Size > ordBook.AskTotalVolume() {
+			panic("order size exceeds total ask volume")
+		}
 		for _, askLimit := range ordBook.Asks() {
-			matches = askLimit.FillOrder(order)
+			askLimit.FillOrder(order, &matches)
+
+			if askLimit.IsEmpty() {
+				emptied = append(emptied, askLimit)
+			}
+			if order.IsFilled() {
+				break
+			}
+		}
+	} else {
+		if order.Size > ordBook.BidTotalVolume() {
+			panic("order size exceeds total bid volume")
+		}
+		for _, bidLimit := range ordBook.Bids() {
+			bidLimit.FillOrder(order, &matches)
+
+			if bidLimit.IsEmpty() {
+				emptied = append(emptied, bidLimit)
+			}
+			if order.IsFilled() {
+				break
+			}
 		}
 	}
-	
-	return matches 
+
+	if len(emptied) > 0 {
+		// order.IsBid consumed asks, so need to clear emptied asks, and vice versa
+		ordBook.clearEmptiedLimits(emptied, !order.IsBid)
+	}
+
+	return matches
 }
 
 
@@ -68,4 +129,20 @@ func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price float64) {
 		}
 		lim.AddOrder(order)
 	}
+}
+
+func (ordBook *OrderBook) BidTotalVolume() float64 {
+	total := 0.0
+	for _, lim := range ordBook.bids {
+		total += lim.TotalVolume
+	}
+	return total
+}
+
+func (ordBook *OrderBook) AskTotalVolume() float64 {
+	total := 0.0
+	for _, lim := range ordBook.asks {
+		total += lim.TotalVolume
+	}
+	return total
 }

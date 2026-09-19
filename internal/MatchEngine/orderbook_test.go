@@ -25,3 +25,23 @@ func TestPlaceLimitOrder(t *testing.T) {
 		fmt.Println(ordBook.bids[i])
 	}
 }
+
+func TestPlaceMarketOrder(t *testing.T) {
+	ordBook := NewOrderBook()
+
+	// liquidity: two ask limits at different prices
+	sellOrderA := NewOrder(false, 20)
+	ordBook.PlaceLimitOrder(sellOrderA, 10_000)
+
+	buyOrderA := NewOrder(true, 10)
+	matches := ordBook.PlaceMarketOrder(buyOrderA)
+
+	assert(t, len(matches), 1)
+	assert(t, len(ordBook.asks), 1)
+	assert(t, ordBook.AskTotalVolume(), 10.0)
+
+	for _, match := range matches {
+		fmt.Printf("%+v",match)
+	}
+	
+}

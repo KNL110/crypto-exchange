@@ -62,7 +62,7 @@ func (ordBook *OrderBook) DeleteLimit(lim *Limit, isBid bool) {
 
 
 // clearEmptiedLimits removes drained limits from the book and re-sorts
-func (ordBook *OrderBook) clearEmptiedLimits(limits []*Limit, isBid bool) {
+func (ordBook *OrderBook) clearLimits(limits []*Limit, isBid bool) {
 	for _, lim := range limits {
 		ordBook.DeleteLimit(lim, isBid)
 	}
@@ -76,7 +76,7 @@ func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
 		if order.Size > ordBook.AskTotalVolume() {
 			panic("order size exceeds total ask volume")
 		}
-		for _, askLimit := range ordBook.Asks() {
+		for _, askLimit := range ordBook.Asks() { //TODO:see if this can be optimized to avoid sorting every time
 			askLimit.FillOrder(order, &matches)
 
 			if askLimit.IsEmpty() {
@@ -90,7 +90,7 @@ func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
 		if order.Size > ordBook.BidTotalVolume() {
 			panic("order size exceeds total bid volume")
 		}
-		for _, bidLimit := range ordBook.Bids() {
+		for _, bidLimit := range ordBook.Bids() { //TODO:see if this can be optimized to avoid sorting every time
 			bidLimit.FillOrder(order, &matches)
 
 			if bidLimit.IsEmpty() {
@@ -104,7 +104,7 @@ func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
 
 	if len(emptied) > 0 {
 		// order.IsBid consumed asks, so need to clear emptied asks, and vice versa
-		ordBook.clearEmptiedLimits(emptied, !order.IsBid)
+		ordBook.clearLimits(emptied, !order.IsBid)
 	}
 
 	return matches

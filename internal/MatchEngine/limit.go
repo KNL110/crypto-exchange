@@ -89,15 +89,24 @@ func (lim *Limit) fillOrder(ordIncoming,ordResting *Order) MatchedOrder {
 }
 
 func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
+	filled := []*Order{}
 
 	for _, o := range lim.Orders {
 		matched := lim.fillOrder(order, o)
 		*matches = append(*matches, matched)
 
+		if o.IsFilled() {
+			filled = append(filled, o)
+		}
 		if order.IsFilled() {
 			break
 		}
 	}
+
+	for _, o := range filled {//TODO: consider doubly linked-list+hashMap for (O(1) removal, and maintains timestamp order)
+		lim.removeOrder(o)
+	}
+	sort.Sort(lim.Orders) // maintain FIFO order after removals
 }
 
 type Limits []*Limit

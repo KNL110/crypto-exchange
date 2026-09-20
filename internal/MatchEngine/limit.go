@@ -2,66 +2,75 @@ package matchengine
 
 import (
 	"fmt"
-	"sort"
 )
 
 // Limit represents a single price level and the orders resting at it.
 type Limits []*Limit
 
 type Limit struct {
-	Price float64
-	Orders
+	Price       float64
 	TotalVolume float64
+	len         uint64
+	head        *Order
+	tail        *Order
 }
 
 func NewLimit(price float64) *Limit {
 	return &Limit{
-		Price:  price,
-		Orders: []*Order{},
+		Price:       price,
+		TotalVolume: 0,
+		head:        nil,
+		tail:        nil,
+		len:         0,
 	}
 }
 
 func (lim *Limit) String() string {
-	return fmt.Sprintf("Limit[Price: %.2f, TotalVolume: %.2f, Orders: %v]", lim.Price, lim.TotalVolume, lim.Orders)
+	return fmt.Sprintf("Limit[Price: %.2f, TotalVolume: %.2f]", lim.Price, lim.TotalVolume)
 }
 
 func (lim *Limit) IsEmpty() bool {
-	return len(lim.Orders) == 0
+	return (lim.TotalVolume == 0)
 }
 
 func (lim *Limit) AddOrder(order *Order) {
 	order.Limit = lim
-	lim.Orders = append(lim.Orders, order)
+
+	if lim.head == nil {
+		lim.head = order
+		lim.tail = order
+	} else {
+		lim.tail.next = order
+		order.prev = lim.tail
+		lim.tail = order
+	}
+	lim.len++
 	lim.TotalVolume += order.Size
 }
 
-// removeOrder detaches order from lim without re-sorting, so callers that
-// remove several orders in a row (e.g. FillOrder) can batch the resort.
-func (lim *Limit) removeOrder(order *Order) {
-	ordLen := len(lim.Orders)
 
-	for i, o := range lim.Orders {
-		if o == order {
-			lim.Orders[i] = lim.Orders[ordLen-1]
-			lim.Orders[ordLen-1] = nil //avoid memory leak
-			lim.Orders = lim.Orders[:ordLen-1]
-			break
-		}
+
+func (lim *Limit) DeleteOrder(order *Order) {
+	if order.prev != nil {
+		order.prev.next = order.next
+	} else {
+		lim.head = order.next
 	}
-	order.Limit = nil //remove the limit reference from order since it is no longer in limit
+
+	if order.next != nil {
+		order.next.prev = order.prev
+	} else {
+		lim.tail = order.prev
+	}
+
+	order.prev = nil
+	order.next = nil
+
+	lim.len--
 	lim.TotalVolume -= order.Size
 }
 
-func (lim *Limit) DeleteOrder(order *Order) {
-	lim.removeOrder(order)
-
-	//sort to maintain FIFO order
-	sort.Sort(lim.Orders)
-}
-
-
-
-func (lim *Limit) fillOrder(ordIncoming,ordResting *Order) MatchedOrder {
+func (lim *Limit) fillOrder(ordIncoming, ordResting *Order) MatchedOrder {
 	var matched MatchedOrder
 
 	if ordIncoming.IsBid {
@@ -84,33 +93,25 @@ func (lim *Limit) fillOrder(ordIncoming,ordResting *Order) MatchedOrder {
 		ordIncoming.Size = 0
 	}
 
-
 	lim.TotalVolume -= matched.SizeFilled
 
 	return matched
 }
 
 func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
-	filled := []*Order{}
 
-	for _, o := range lim.Orders {
+	for o := lim.head; o != nil; o = o.next {
 		matched := lim.fillOrder(order, o)
 		*matches = append(*matches, matched)
 
 		if o.IsFilled() {
-			filled = append(filled, o)
+			lim.DeleteOrder(o)
 		}
 		if order.IsFilled() {
 			break
 		}
 	}
-
-	for _, o := range filled {//TODO: consider doubly linked-list+hashMap for (O(1) removal, and maintains timestamp order)
-		lim.removeOrder(o)
-	}
-	sort.Sort(lim.Orders) // maintain FIFO order after removals
 }
-
 
 func (lims Limits) Len() int {
 	return len(lims)

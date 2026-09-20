@@ -146,3 +146,7 @@ func (ordBook *OrderBook) AskTotalVolume() float64 {
 	}
 	return total
 }
+
+func (ordBook *OrderBook) cancelOrder(order *Order, price float64) {
+	//TODO: implement cancelOrder logic
+}

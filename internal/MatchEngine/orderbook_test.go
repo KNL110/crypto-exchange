@@ -12,46 +12,46 @@ func assert(t *testing.T, a,b any){
 	}
 }
 
-// func TestLimit(t *testing.T) {
-// 	l := NewLimit(10_000)
-// 	buyOrderA := NewOrder(true, 5)
-// 	buyOrderB := NewOrder(true, 10)
-// 	buyOrderC := NewOrder(true, 15)
-// 	l.AddOrder(buyOrderA)
-// 	l.AddOrder(buyOrderB)
-// 	l.AddOrder(buyOrderC)
+func TestLimit(t *testing.T) {
+	l := NewLimit(10_000)
+	buyOrderA := NewOrder(true, 5)
+	buyOrderB := NewOrder(true, 10)
+	buyOrderC := NewOrder(true, 15)
+	l.AddOrder(buyOrderA)
+	l.AddOrder(buyOrderB)
+	l.AddOrder(buyOrderC)
 
-// 	fmt.Println(l)
+	fmt.Println(l)
 
-// 	l.DeleteOrder(buyOrderA)
-// 	fmt.Println(l)
+	l.DeleteOrder(buyOrderA)
+	fmt.Println(l)
 
-// 	l.DeleteOrder(buyOrderB)
-// 	fmt.Println(l)
+	l.DeleteOrder(buyOrderB)
+	fmt.Println(l)
 
-// 	l.DeleteOrder(buyOrderC)
-// 	fmt.Println(l)
+	l.DeleteOrder(buyOrderC)
+	fmt.Println(l)
 
-// 	buyOrder := NewOrder(true, 10)
+	buyOrder := NewOrder(true, 10)
 
-// 	l.AddOrder(buyOrder)
-// 	fmt.Println(l)
-// }
+	l.AddOrder(buyOrder)
+	fmt.Println(l)
+}
 
 
-// func TestPlaceLimitOrder(t *testing.T) {
-// 	ordBook := NewOrderBook()
+func TestPlaceLimitOrder(t *testing.T) {
+	ordBook := NewOrderBook()
 
-// 	sellOrderA := NewOrder(false, 10)
-// 	sellOrderB := NewOrder(false, 5)
-// 	ordBook.PlaceLimitOrder(sellOrderA,10_000)
-// 	ordBook.PlaceLimitOrder(sellOrderB,8_000)
+	sellOrderA := NewOrder(false, 10)
+	sellOrderB := NewOrder(false, 5)
+	ordBook.PlaceLimitOrder(sellOrderA,10_000)
+	ordBook.PlaceLimitOrder(sellOrderB,8_000)
 
-// 	assert(t,len(ordBook.asks),2)
-// 	for i := 0; i < len(ordBook.asks); i++ {
-// 		fmt.Println(ordBook.asks[i])
-// 	}
-// }
+	assert(t,len(ordBook.asks),2)
+	for i := 0; i < len(ordBook.asks); i++ {
+		fmt.Println(ordBook.asks[i])
+	}
+}
 
 func TestPlaceMarketOrder(t *testing.T) {
 	ordBook := NewOrderBook()

@@ -48,9 +48,11 @@ func (lim *Limit) AddOrder(order *Order) {
 	lim.TotalVolume += order.Size
 }
 
-
-
 func (lim *Limit) DeleteOrder(order *Order) {
+	if order.Limit != lim {
+		panic("order does not belong to this limit")
+	}
+
 	if order.prev != nil {
 		order.prev.next = order.next
 	} else {
@@ -100,7 +102,8 @@ func (lim *Limit) fillOrder(ordIncoming, ordResting *Order) MatchedOrder {
 
 func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
 
-	for o := lim.head; o != nil; o = o.next {
+	for o := lim.head; o != nil; {
+		next := o.next
 		matched := lim.fillOrder(order, o)
 		*matches = append(*matches, matched)
 
@@ -110,6 +113,7 @@ func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
 		if order.IsFilled() {
 			break
 		}
+		o = next
 	}
 }
 

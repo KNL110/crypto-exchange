@@ -28,7 +28,7 @@ func NewOrder(isbid bool, size float64) *Order {
 }
 
 func (order *Order) String() string {
-	return fmt.Sprintf("Order[size: %.2f]", order.Size, order.IsBid)
+	return fmt.Sprintf("Order[size: %.2f]", order.Size)
 }
 
 func (order *Order) IsFilled() bool {

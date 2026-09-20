@@ -6,6 +6,8 @@ import (
 )
 
 // Limit represents a single price level and the orders resting at it.
+type Limits []*Limit
+
 type Limit struct {
 	Price float64
 	Orders
@@ -109,7 +111,6 @@ func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
 	sort.Sort(lim.Orders) // maintain FIFO order after removals
 }
 
-type Limits []*Limit
 
 func (lims Limits) Len() int {
 	return len(lims)

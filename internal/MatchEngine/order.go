@@ -11,6 +11,9 @@ type Order struct {
 	IsBid     bool
 	Limit     *Limit
 	Timestamp int64
+
+	prev *Order
+	next *Order
 }
 
 func NewOrder(isbid bool, size float64) *Order {
@@ -18,6 +21,8 @@ func NewOrder(isbid bool, size float64) *Order {
 		Size:      size,
 		IsBid:     isbid,
 		Timestamp: time.Now().UnixNano(),
+		prev:      nil,
+		next:      nil,
 	}
 }
 

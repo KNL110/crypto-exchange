@@ -4,13 +4,11 @@ import (
 	"fmt"
 )
 
-// Limit represents a single price level and the orders resting at it.
-type Limits []*Limit
 
 type Limit struct {
 	Price       float64
-	TotalVolume float64
-	len         uint64
+	TotalVolume int64
+	len         int64
 	head        *Order
 	tail        *Order
 }
@@ -26,7 +24,7 @@ func NewLimit(price float64) *Limit {
 }
 
 func (lim *Limit) String() string {
-	return fmt.Sprintf("Limit[Price: %.2f, TotalVolume: %.2f]", lim.Price, lim.TotalVolume)
+	return fmt.Sprintf("Limit[Price: %.2f, TotalVolume: %d]", lim.Price, lim.TotalVolume)
 }
 
 func (lim *Limit) IsEmpty() bool {
@@ -117,28 +115,23 @@ func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
 	}
 }
 
-func (lims Limits) Len() int {
-	return len(lims)
+//-------------------------------------------------------------------------------
+type Limits []*Limit
+
+func (l Limits) Len() int {
+	return len(l)
+}
+func (l Limits) Swap(i, j int) {
+	l[i], l[j] = l[j], l[i]
 }
 
-func (lims Limits) Swap(i, j int) {
-	lims[i], lims[j] = lims[j], lims[i]
+type BybestAsk struct{ Limits }
+type BybestBid struct{ Limits }
+
+func (l BybestAsk) Less(i, j int) bool {
+	return l.Limits[i].Price < l.Limits[j].Price
 }
 
-// BybestAsk sorts Limits ascending by price (lowest ask first).
-type BybestAsk struct {
-	Limits
-}
-
-func (a BybestAsk) Less(i, j int) bool {
-	return a.Limits[i].Price < a.Limits[j].Price
-}
-
-// BybestBid sorts Limits descending by price (highest bid first).
-type BybestBid struct {
-	Limits
-}
-
-func (b BybestBid) Less(i, j int) bool {
-	return b.Limits[i].Price > b.Limits[j].Price
+func (l BybestBid) Less(i, j int) bool {
+	return l.Limits[i].Price > l.Limits[j].Price
 }

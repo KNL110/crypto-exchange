@@ -65,9 +65,9 @@ func TestPlaceMarketOrder(t *testing.T) {
 
 	assert(t, len(matches), 1)
 	assert(t, len(ordBook.asks), 1)
-	assert(t, ordBook.AskTotalVolume(), 10.0)
+	assert(t, ordBook.AskTotalVolume(), int64(10))
 	assert(t, matches[0].Price, 10_000.0)
-	assert(t, matches[0].SizeFilled, 10.0)
+	assert(t, matches[0].SizeFilled, int64(10))
 	assert(t, buyOrderA.IsFilled(), true)
 
 	for _, match := range matches {
@@ -89,13 +89,13 @@ func TestPlaceMarketOrderWithMultipleMatches(t *testing.T) {
 	ordBook.PlaceLimitOrder(buyOrderD, 9_000)
 	ordBook.PlaceLimitOrder(buyOrderA, 10_000)
 
-	assert(t, ordBook.BidTotalVolume(), 31.0)
+	assert(t, ordBook.BidTotalVolume(), int64(31))
 
 	sellOrder := NewOrder(false, 27)
 	matches := ordBook.PlaceMarketOrder(sellOrder)
 
 	assert(t, len(matches), 4)
-	assert(t, ordBook.BidTotalVolume(), 4.0)
+	assert(t, ordBook.BidTotalVolume(), int64(4))
 	assert(t, len(ordBook.bids), 1)
 
 	for _, match := range matches {

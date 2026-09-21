@@ -7,7 +7,7 @@ import (
 
 // Order represents a single buy or sell order resting at a price level.
 type Order struct {
-	Size      float64
+	Size      int64
 	IsBid     bool
 	Limit     *Limit
 	Timestamp int64
@@ -16,7 +16,7 @@ type Order struct {
 	next *Order
 }
 
-func NewOrder(isbid bool, size float64) *Order {
+func NewOrder(isbid bool, size int64) *Order {
 	return &Order{
 		Size:      size,
 		IsBid:     isbid,
@@ -28,7 +28,7 @@ func NewOrder(isbid bool, size float64) *Order {
 }
 
 func (order *Order) String() string {
-	return fmt.Sprintf("Order[size: %.2f]", order.Size)
+	return fmt.Sprintf("Order[size: %d]", order.Size)
 }
 
 func (order *Order) IsFilled() bool {

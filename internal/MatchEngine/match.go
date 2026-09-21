@@ -3,6 +3,6 @@ package matchengine
 type MatchedOrder struct {
 	Ask        *Order
 	Bid        *Order
-	SizeFilled float64
+	SizeFilled int64
 	Price      float64
 }

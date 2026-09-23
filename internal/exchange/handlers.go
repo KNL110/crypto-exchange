@@ -12,6 +12,10 @@ type Handler struct {
 	ex *Exchange
 }
 
+func NewHandler(ex *Exchange) *Handler {
+	return &Handler{ex: ex}
+}
+
 func side(isbid bool) string{
 	if isbid {
 		return "buy"
@@ -25,11 +29,11 @@ func side(isbid bool) string{
 func (h *Handler) mapError(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrUnknownSymbol), errors.Is(err, ErrOrderNotFound):
-		return c.JSON(http.StatusNotFound, errorResponse{err.Error()})
+		return c.JSON(http.StatusNotFound, newErrorResponse(err))
 	case errors.Is(err, ErrInsufficientLiquidity):
-		return c.JSON(http.StatusConflict, errorResponse{err.Error()})
+		return c.JSON(http.StatusConflict, newErrorResponse(err))
 	case errors.Is(err, ErrInvalidSize), errors.Is(err, ErrInvalidPrice):
-		return c.JSON(http.StatusBadRequest, errorResponse{err.Error()})
+		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	default:
 		return c.JSON(http.StatusInternalServerError, "internal error")
 	}
@@ -58,14 +62,24 @@ func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
 	}
 	symbol := Symbol(req.Symbol)
 
-	matches, err := h.ex.placeMarketOrder(req.IsBid, req.Size, symbol)
+	matches,order, err := h.ex.placeMarketOrder(req.IsBid, req.Size, symbol)
 	if err != nil {
 		return h.mapError(c,err)
 	}
+	return c.JSON(http.StatusCreated, newMarketOrderResponse(order,symbol,&matches))
+}
 
+func (h *Handler) CancelOrder(c *echo.Context) error {
+	var req cancelOrderRequest
 
-	return c.JSON(http.StatusCreated, matchedOrderResponse{
-		SizeFilled: matches[0].SizeFilled,
-		Price: matches[0].Price,
-	})
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return fmt.Errorf("CancelOrderHandler -> %w", err)
+	}
+	symbol := Symbol(req.Symbol)
+
+	order, err := h.ex.cancelOrder(symbol, req.OrderID)
+	if err != nil {
+		return h.mapError(c,err)
+	}
+	return c.JSON(http.StatusOK, newOrderResponse(order, symbol))
 }

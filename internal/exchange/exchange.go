@@ -34,7 +34,7 @@ func (e *Exchange) Symbols() []Symbol {
 	}
 	return symbols
 }
-
+//TODO:consider the performance impact of copying the order struct in all these services
 func (e *Exchange) placeLimitOrder(isBid bool,price float64,size int64,sym Symbol) (*matchengine.Order,error){
 	if size <= 0 {
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w",ErrInvalidSize)
@@ -60,14 +60,14 @@ func (e *Exchange) placeLimitOrder(isBid bool,price float64,size int64,sym Symbo
 	return &snap,nil
 }
 
-func (e *Exchange) placeMarketOrder(isBid bool,size int64,sym Symbol) ([]matchengine.MatchedOrder,error){
+func (e *Exchange) placeMarketOrder(isBid bool,size int64,sym Symbol) ([]matchengine.MatchedOrder,*matchengine.Order,error){
 	if size <= 0 {
-		return nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",ErrInvalidSize)
+		return nil,nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",ErrInvalidSize)
 	}
 
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
+		return nil,nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
@@ -77,7 +77,23 @@ func (e *Exchange) placeMarketOrder(isBid bool,size int64,sym Symbol) ([]matchen
 
 	matched, err := sb.book.PlaceMarketOrder(order)
 	if err != nil {
-		return nil,fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
+		return nil,nil,fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
 	}
-	return matched,nil
+	snap := *order
+	return matched,&snap,nil
+}
+
+func (e *Exchange) cancelOrder(sym Symbol,orderID uint64) (*matchengine.Order,error){
+	sb, err := e.symbolBook(sym)
+	if err != nil {
+		return nil,fmt.Errorf("CancelOrder (Exchange): %w",err)
+	}
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	order, err := sb.book.CancelOrder(orderID)
+	if err != nil {
+		return nil,fmt.Errorf("CancelOrder (Exchange): %w",err)
+	}
+	return order,nil
 }

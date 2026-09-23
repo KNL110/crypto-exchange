@@ -15,6 +15,11 @@ type placeMarketOrderRequest struct {
 	Size   int64  `json:"size"`
 }
 
+type cancelOrderRequest struct {
+	Symbol  string `json:"symbol"`
+	OrderID uint64 `json:"orderId"`
+}
+
 type orderResponse struct {
 	Symbol    string  `json:"symbol"`
 	Side      string  `json:"side"`

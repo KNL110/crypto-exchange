@@ -9,18 +9,20 @@ import (
 // SymbolBook pairs one symbol's order book with the mutex that serializes
 // all access to it. Each symbol gets its own lock so unrelated symbols never
 // contend with each other.
+
+type Symbol string
 const(
-	symETH = "ETH"
+	SymETH = Symbol("ETH")
 )
 
 
 type SymbolBook struct {
 	mu     sync.Mutex
-	symbol string
+	symbol Symbol
 	book   *matchengine.OrderBook
 }
 
-func newSymbolBook(symbol string) *SymbolBook {
+func newSymbolBook(symbol Symbol) *SymbolBook {
 	return &SymbolBook{
 		symbol: symbol,
 		book:   matchengine.NewOrderBook(),

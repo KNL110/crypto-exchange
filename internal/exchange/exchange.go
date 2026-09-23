@@ -6,16 +6,16 @@ import (
 
 // Exchange coordinates trading across all configured symbols.
 type Exchange struct {
-	books map[string]*SymbolBook
+	books map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
 }
 
 func NewExchange() *Exchange {
-	books := make(map[string]*SymbolBook)
+	books := make(map[Symbol]*SymbolBook)
 	return &Exchange{books: books}
 }
 
-func (e *Exchange) symbolBook(symbol string) (*SymbolBook, error) {
+func (e *Exchange) symbolBook(symbol Symbol) (*SymbolBook, error) {
 	sb, ok := e.books[symbol]
 	if !ok {
 		return nil, ErrUnknownSymbol
@@ -24,8 +24,8 @@ func (e *Exchange) symbolBook(symbol string) (*SymbolBook, error) {
 }
 
 // Symbols returns the configured trading symbols.
-func (e *Exchange) Symbols() []string {
-	symbols := make([]string, 0, len(e.books))
+func (e *Exchange) Symbols() []Symbol {
+	symbols := make([]Symbol, 0, len(e.books))
 	for s := range e.books {
 		symbols = append(symbols, s)
 	}

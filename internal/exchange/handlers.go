@@ -25,11 +25,11 @@ func side(isbid bool) string{
 func (h *Handler) mapError(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrUnknownSymbol), errors.Is(err, ErrOrderNotFound):
-		return c.JSON(http.StatusNotFound, ErrorResponse{err.Error()})
+		return c.JSON(http.StatusNotFound, errorResponse{err.Error()})
 	case errors.Is(err, ErrInsufficientLiquidity):
-		return c.JSON(http.StatusConflict, ErrorResponse{err.Error()})
+		return c.JSON(http.StatusConflict, errorResponse{err.Error()})
 	case errors.Is(err, ErrInvalidSize), errors.Is(err, ErrInvalidPrice):
-		return c.JSON(http.StatusBadRequest, ErrorResponse{err.Error()})
+		return c.JSON(http.StatusBadRequest, errorResponse{err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, "internal error")
 	}
@@ -43,15 +43,29 @@ func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 	}
 	symbol := Symbol(req.Symbol)
 
-	order, err := h.ex.placeLimitOrder(req.IsBid, req.Price, uint64(req.Size), symbol)
+	order, err := h.ex.placeLimitOrder(req.IsBid, req.Price, req.Size, symbol)
+	if err != nil {
+		return h.mapError(c,err)
+	}
+	return c.JSON(http.StatusCreated, newOrderResponse(order, symbol))
+}
+
+func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
+	var req placeMarketOrderRequest
+
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return fmt.Errorf("PlaceMarketOrderHandler -> %w", err)
+	}
+	symbol := Symbol(req.Symbol)
+
+	matches, err := h.ex.placeMarketOrder(req.IsBid, req.Size, symbol)
 	if err != nil {
 		return h.mapError(c,err)
 	}
 
-	return c.JSON(http.StatusCreated,OrderResponse{
-		Symbol: string(symbol),
-		Side: side(order.IsBid),
-		Size: order.Size,
-		Price: order.Limit.Price,
+
+	return c.JSON(http.StatusCreated, matchedOrderResponse{
+		SizeFilled: matches[0].SizeFilled,
+		Price: matches[0].Price,
 	})
 }

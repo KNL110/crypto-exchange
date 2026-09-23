@@ -35,7 +35,7 @@ func (e *Exchange) Symbols() []Symbol {
 	return symbols
 }
 
-func (e *Exchange) placeLimitOrder(isBid bool,price float64,size uint64,sym Symbol) (*matchengine.Order,error){
+func (e *Exchange) placeLimitOrder(isBid bool,price float64,size int64,sym Symbol) (*matchengine.Order,error){
 	if size <= 0 {
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w",ErrInvalidSize)
 	}
@@ -51,10 +51,33 @@ func (e *Exchange) placeLimitOrder(isBid bool,price float64,size uint64,sym Symb
 	defer sb.mu.Unlock()
 
 	id := e.nextOrderID.Add(1)
-	order := matchengine.NewOrder(id,isBid,int64(size))
+	order := matchengine.NewOrder(id,isBid,size)
 
 	if err = sb.book.PlaceLimitOrder(order,price); err != nil {
 		return nil,fmt.Errorf("PlaceLimitOrder (Exchange): %w",err)
 	}
-	return order,nil
+	snap := *order
+	return &snap,nil
+}
+
+func (e *Exchange) placeMarketOrder(isBid bool,size int64,sym Symbol) ([]matchengine.MatchedOrder,error){
+	if size <= 0 {
+		return nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",ErrInvalidSize)
+	}
+
+	sb, err := e.symbolBook(sym)
+	if err != nil {
+		return nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
+	}
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	id := e.nextOrderID.Add(1)
+	order := matchengine.NewOrder(id,isBid,size)
+
+	matched, err := sb.book.PlaceMarketOrder(order)
+	if err != nil {
+		return nil,fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
+	}
+	return matched,nil
 }

@@ -11,6 +11,7 @@ type OrderBook struct {
 	bids      []*Limit
 	AskLimits map[float64]*Limit
 	BidLimits map[float64]*Limit
+	orders    map[uint64]*Order
 }
 
 func NewOrderBook() *OrderBook {
@@ -19,11 +20,12 @@ func NewOrderBook() *OrderBook {
 		bids:      []*Limit{},
 		AskLimits: make(map[float64]*Limit),
 		BidLimits: make(map[float64]*Limit),
+		orders:    make(map[uint64]*Order),
 	}
 }
 
 func (ordBook *OrderBook) String() string {
-	return fmt.Sprintf("OrderBook[Asks: %v, Bids: %v]", ordBook.Asks(), ordBook.Bids()) //TODO:.Asks and .Bids are not methods, so this will not work. Need to implement a way to print the order book
+	return fmt.Sprintf("OrderBook[Asks: %v, Bids: %v]", ordBook.Asks(), ordBook.Bids())
 }
 
 func (ordBook *OrderBook) Asks() []*Limit {
@@ -36,18 +38,42 @@ func (ordBook *OrderBook) Bids() Limits {
 	return ordBook.bids
 }
 
-//	func DeleteNode(head *Limit, tail *Limit, lim *Limit) {
-//		if lim.prev != nil {
-//			lim.prev.next = lim.next
-//		} else {
-//			head = lim.next
-//		}
-//		if lim.next != nil {
-//			lim.next.prev = lim.prev
-//		} else {
-//			tail = lim.prev
-//		}
-//	}
+func (ordBook *OrderBook) GetOrder(id uint64) (*Order, bool) {
+	order, ok := ordBook.orders[id]
+	return order, ok
+}
+
+func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price float64) error {
+	if order.ID != 0 {
+		if _, exists := ordBook.orders[order.ID]; exists {
+			return fmt.Errorf("PlaceLimitOrder -> %w", ErrDuplicateOrderID)
+		}
+	}
+
+	var err error = nil
+	if order.IsBid {
+		lim, exists := ordBook.BidLimits[price]
+		if !exists {
+			lim = NewLimit(price)
+			ordBook.BidLimits[price] = lim
+			ordBook.bids = append(ordBook.bids, lim)
+		}
+		lim.AddOrder(order)
+	} else {
+		lim, exists := ordBook.AskLimits[price]
+		if !exists {
+			lim = NewLimit(price)
+			ordBook.AskLimits[price] = lim
+			ordBook.asks = append(ordBook.asks, lim)
+		}
+		lim.AddOrder(order)
+	}
+	if order.ID != 0 {
+		ordBook.orders[order.ID] = order
+	}
+	return err
+}
+
 func (ordBook *OrderBook) removeLimit(lim *Limit, isBid bool) {
 	if isBid {
 		delete(ordBook.BidLimits, lim.Price)
@@ -81,13 +107,13 @@ func (ordBook *OrderBook) DeleteLimit(lim *Limit, isBid bool) {
 	}
 }
 
-func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
+func (ordBook *OrderBook) PlaceMarketOrder(order *Order) ([]MatchedOrder, error) {
 	matches := []MatchedOrder{}
 	toDelete := []*Limit{}
 
 	if order.IsBid {
 		if order.Size > ordBook.AskTotalVolume() {
-			panic("order size exceeds total ask volume")
+			return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
 		}
 		for _, askLimit := range ordBook.Asks() {
 			askLimit.FillOrder(order, &matches)
@@ -101,7 +127,7 @@ func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
 		}
 	} else {
 		if order.Size > ordBook.BidTotalVolume() {
-			panic("order size exceeds total bid volume")
+			return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
 		}
 		for _, bidLimit := range ordBook.Bids() {
 			bidLimit.FillOrder(order, &matches)
@@ -114,34 +140,22 @@ func (ordBook *OrderBook) PlaceMarketOrder(order *Order) []MatchedOrder {
 			}
 		}
 	}
+	for _, m := range matches {
+		resting := m.Bid
+		if order.IsBid {
+			resting = m.Ask
+		}
+		if resting.IsFilled() {
+			delete(ordBook.orders, resting.ID)
+		}
+	}
 	if len(toDelete) > 0 {
 		for _, lim := range toDelete {
 			ordBook.removeLimit(lim, !order.IsBid)
 		}
 		ordBook.DeleteLimit(nil, !order.IsBid)
 	}
-	
-	return matches
-}
-
-func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price float64) {
-	if order.IsBid {
-		lim, exists := ordBook.BidLimits[price]
-		if !exists {
-			lim = NewLimit(price)
-			ordBook.BidLimits[price] = lim
-			ordBook.bids = append(ordBook.bids, lim)
-		}
-		lim.AddOrder(order)
-	} else {
-		lim, exists := ordBook.AskLimits[price]
-		if !exists {
-			lim = NewLimit(price)
-			ordBook.AskLimits[price] = lim
-			ordBook.asks = append(ordBook.asks, lim)
-		}
-		lim.AddOrder(order)
-	}
+	return matches, nil
 }
 
 func (ordBook *OrderBook) BidTotalVolume() int64 {
@@ -160,8 +174,21 @@ func (ordBook *OrderBook) AskTotalVolume() int64 {
 	return total
 }
 
-func (ordBook *OrderBook) cancelOrder(order *Order, price float64) {
-	//TODO: implement cancelOrder logic
-}
 
-//
+func (ordBook *OrderBook) CancelOrder(id uint64) (*Order, error) {
+	order, ok := ordBook.orders[id]
+	if !ok {
+		return nil, fmt.Errorf("CancelOrder -> %w", ErrOrderNotFound)
+	}
+
+	lim := order.Limit
+	if err := lim.DeleteOrder(order); err != nil {
+		return nil, fmt.Errorf("CancelOrder -> %w", err)
+	}
+	delete(ordBook.orders, id)
+
+	if lim.IsEmpty() {
+		ordBook.DeleteLimit(lim, order.IsBid)
+	}
+	return order, nil
+}

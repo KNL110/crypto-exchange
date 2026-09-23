@@ -4,7 +4,6 @@ import (
 	"fmt"
 )
 
-
 type Limit struct {
 	Price       float64
 	TotalVolume int64
@@ -31,6 +30,7 @@ func (lim *Limit) IsEmpty() bool {
 	return (lim.TotalVolume == 0)
 }
 
+
 func (lim *Limit) AddOrder(order *Order) {
 	order.Limit = lim
 
@@ -42,13 +42,18 @@ func (lim *Limit) AddOrder(order *Order) {
 		order.prev = lim.tail
 		lim.tail = order
 	}
+
 	lim.len++
 	lim.TotalVolume += order.Size
 }
 
-func (lim *Limit) DeleteOrder(order *Order) {
+func (lim *Limit) DeleteOrder(order *Order) error {
+	if order == nil {
+		return fmt.Errorf("DeleteOrder -> %w", ErrNilOrder)
+	}
+
 	if order.Limit != lim {
-		panic("order does not belong to this limit")
+		return fmt.Errorf("DeleteOrder -> %w",ErrWrongLimit)
 	}
 
 	if order.prev != nil {
@@ -63,11 +68,12 @@ func (lim *Limit) DeleteOrder(order *Order) {
 		lim.tail = order.prev
 	}
 
-	order.prev = nil
+	order.prev = nil  //TODO: consider for performance affects due to garbage collection
 	order.next = nil
 
 	lim.len--
 	lim.TotalVolume -= order.Size
+	return nil
 }
 
 func (lim *Limit) fillOrder(ordIncoming, ordResting *Order) MatchedOrder {
@@ -115,7 +121,7 @@ func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
 	}
 }
 
-//-------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------
 type Limits []*Limit
 
 func (l Limits) Len() int {

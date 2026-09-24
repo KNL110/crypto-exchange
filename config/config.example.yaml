@@ -1,0 +1,5 @@
+env: "dev"
+dbPath: <DATABASE_URL> # for local: "postgresql://<username>:<password>@localhost:5432/<DatabaseName>"
+httpServer:
+    address: "0.0.0.0"
+    port: 8080

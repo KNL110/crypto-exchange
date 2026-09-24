@@ -3,7 +3,6 @@ package exchange
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/labstack/echo/v5"
 	"net/http"
 )
@@ -43,7 +42,7 @@ func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 	var req placeLimitOrderRequest
 
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		return fmt.Errorf("PlaceLimitOrderHandler -> %w", err)
+		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
 
@@ -58,7 +57,7 @@ func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
 	var req placeMarketOrderRequest
 
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		return fmt.Errorf("PlaceMarketOrderHandler -> %w", err)
+		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
 
@@ -73,7 +72,7 @@ func (h *Handler) CancelOrder(c *echo.Context) error {
 	var req cancelOrderRequest
 
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		return fmt.Errorf("CancelOrderHandler -> %w", err)
+		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
 
@@ -82,4 +81,8 @@ func (h *Handler) CancelOrder(c *echo.Context) error {
 		return h.mapError(c,err)
 	}
 	return c.JSON(http.StatusOK, newOrderResponse(order, symbol))
+}
+// Health reports server status along with the configured trading symbols.
+func (h *Handler) Health(c *echo.Context) error {
+	return c.JSON(http.StatusOK, newHealthResponse("ok", h.ex.Symbols()))
 }

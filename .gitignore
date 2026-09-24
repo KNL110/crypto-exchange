@@ -9,6 +9,7 @@
 *.so
 *.dylib
 /bin/exchange
+/bin/exchangectl
 
 # Test binary, built with `go test -c`
 *.test
@@ -29,9 +30,14 @@ go.work.sum
 # env file
 .env
 
+# exchange write-ahead log / runtime data
+/data/
+
 # Editor/IDE
 # .idea/
 # .vscode/
 
 # misc
 /internal/MatchEngine/BPLUSTREE_TUTORIAL.md
+/.context
+/config/config.yaml

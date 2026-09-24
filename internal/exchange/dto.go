@@ -21,14 +21,16 @@ type cancelOrderRequest struct {
 }
 
 type orderResponse struct {
-	Symbol    string  `json:"symbol"`
-	Side      string  `json:"side"`
-	Size      int64   `json:"size"`
-	Price     float64 `json:"price,omitempty"`
+	Id     uint64  `json:"id"`
+	Symbol string  `json:"symbol"`
+	Side   string  `json:"side"`
+	Size   int64   `json:"size"`
+	Price  float64 `json:"price,omitempty"`
 }
 
 func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
 	res := orderResponse{
+		Id:     order.ID,
 		Symbol: string(symbol),
 		Side:   side(order.IsBid),
 		Size:   order.Size,
@@ -41,14 +43,13 @@ func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
 }
 
 type placeMarketOrderResponse struct {
-	Order   orderResponse           `json:"order"`
-	Matches []matchedOrderResponse  `json:"matches"`
+	Order   orderResponse          `json:"order"`
+	Matches []matchedOrderResponse `json:"matches"`
 }
 
-
 type matchedOrderResponse struct {
-	SizeFilled int64          `json:"sizeFilled"`
-	Price      float64        `json:"price"`
+	SizeFilled int64   `json:"sizeFilled"`
+	Price      float64 `json:"price"`
 }
 
 func newMatchedOrderResponse(m matchengine.MatchedOrder) matchedOrderResponse {

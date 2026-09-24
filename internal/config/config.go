@@ -2,22 +2,29 @@
 package config
 
 import (
+	"flag"
+	"github.com/ilyakaznacheev/cleanenv"
+	"log"
 	"os"
 	"time"
-	"flag"
-	"log"
-	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type HttpServer struct {
 	Addr string `yaml:"address" env:"HOST" env-default:"0.0.0.0"`
 	Port string `yaml:"port" env:"PORT" env-default:"8080"`
 }
-//TODO: complete config struct with all the required fields,and validation
+
+type GanacheServer struct {
+	Address string `yaml:"address" env:"GANACHE_HOST" env-default:"localhost"`
+	Port    string `yaml:"port" env:"GANACHE_PORT" env-default:"8545"`
+}
+
+// TODO: complete config struct with all the required fields,and validation
 type Config struct {
-	Env string `yaml:"env" env-required:"true"`
-	DBPath string `yaml:"dbPath" env:"DB_PATH" env-required:"true"`
-	HttpServer `yaml:"httpServer"`
+	Env           string `yaml:"env" env-required:"true"`
+	DBPath        string `yaml:"dbPath" env:"DB_PATH" env-required:"true"`
+	HttpServer    `yaml:"httpServer"`
+	GanacheServer `yaml:"ganacheServer"`
 
 	LogLevel        string
 	LogPretty       bool
@@ -28,20 +35,25 @@ type Config struct {
 }
 
 func (srv *HttpServer) GetAddr() string {
-	return srv.Addr+":"+srv.Port
+	return srv.Addr + ":" + srv.Port
 }
 
-func (cfg *Config) checkEnv(){
-	if(cfg.Env=="dev" && cfg.HttpServer.Addr=="localhost"){
-		log.Printf("develepoment Environment, addr: %s",cfg.HttpServer.GetAddr())
-	}else if(cfg.Env=="prod"){
-		if(cfg.HttpServer.Addr != "0.0.0.0"){
+func (srv *GanacheServer) GetAddr() string {
+	return srv.Address + ":" + srv.Port
+}
+
+//TODO: check for what to do with ganache server
+func (cfg *Config) checkEnv() {
+	if cfg.Env == "dev" && cfg.HttpServer.Addr == "localhost" {
+		log.Printf("develepoment Environment, addr: %s", cfg.HttpServer.GetAddr())
+	} else if cfg.Env == "prod" {
+		if cfg.HttpServer.Addr != "0.0.0.0" {
 			cfg.HttpServer.Addr = "0.0.0.0"
-			log.Printf("setting address to %s",cfg.HttpServer.Addr)
+			log.Printf("setting address to %s", cfg.HttpServer.Addr)
 		}
 		log.Println("Production Environment")
-	}else{
-		log.Fatalf("invalid Env value: %s",cfg.Env)
+	} else {
+		log.Fatalf("invalid Env value: %s", cfg.Env)
 	}
 }
 
@@ -51,22 +63,22 @@ func MustLoad() *Config {
 	configPath = os.Getenv("CONFIG_PATH")
 
 	if configPath == "" {
-		flags := flag.String("config", "","path to config file")
+		flags := flag.String("config", "", "path to config file")
 		flag.Parse()
 
 		configPath = *flags
 
-		if configPath == ""{
+		if configPath == "" {
 			log.Fatal("config path not set")
 		}
 	}
-	
+
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		log.Fatalf("config file does not exist: %s", configPath)
 	}
 
 	var config Config
-	err := cleanenv.ReadConfig(configPath,&config)
+	err := cleanenv.ReadConfig(configPath, &config)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
@@ -75,4 +87,3 @@ func MustLoad() *Config {
 
 	return &config
 }
-

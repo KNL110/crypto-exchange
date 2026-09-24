@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -13,8 +14,10 @@ type Exchange struct {
 	nextOrderID atomic.Uint64
 }
 
+// NewExchange creates an Exchange with an empty order book for each symbol.
 func NewExchange() *Exchange {
 	books := make(map[Symbol]*SymbolBook)
+	books[SymETH] = newSymbolBook(SymETH)
 	return &Exchange{orderBooks: books}
 }
 
@@ -77,6 +80,9 @@ func (e *Exchange) placeMarketOrder(isBid bool,size int64,sym Symbol) ([]matchen
 
 	matched, err := sb.book.PlaceMarketOrder(order)
 	if err != nil {
+		if errors.Is(err, matchengine.ErrInsufficientLiquidity) {
+			err = ErrInsufficientLiquidity
+		}
 		return nil,nil,fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
 	}
 	snap := *order
@@ -93,6 +99,9 @@ func (e *Exchange) cancelOrder(sym Symbol,orderID uint64) (*matchengine.Order,er
 
 	order, err := sb.book.CancelOrder(orderID)
 	if err != nil {
+		if errors.Is(err, matchengine.ErrOrderNotFound) {
+			err = ErrOrderNotFound
+		}
 		return nil,fmt.Errorf("CancelOrder (Exchange): %w",err)
 	}
 	return order,nil

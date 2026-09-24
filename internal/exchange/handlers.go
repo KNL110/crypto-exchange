@@ -1,7 +1,6 @@
 package exchange
 
 import (
-	"encoding/json"
 	"errors"
 	"github.com/labstack/echo/v5"
 	"net/http"
@@ -41,7 +40,7 @@ func (h *Handler) mapError(c *echo.Context, err error) error {
 func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 	var req placeLimitOrderRequest
 
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
@@ -56,7 +55,7 @@ func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
 	var req placeMarketOrderRequest
 
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
@@ -71,7 +70,7 @@ func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
 func (h *Handler) CancelOrder(c *echo.Context) error {
 	var req cancelOrderRequest
 
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -27,8 +28,25 @@ func newApplication(cfg *config.Config, exchangeHandler *exchange.Handler) *appl
 	}
 }
 
+// strictJSONSerializer is Echo's default JSON serializer, except that
+// decoding rejects request bodies containing fields the target struct
+// doesn't declare.
+type strictJSONSerializer struct {
+	echo.DefaultJSONSerializer
+}
+
+func (strictJSONSerializer) Deserialize(c *echo.Context, target any) error {
+	dec := json.NewDecoder(c.Request().Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		return echo.ErrBadRequest.Wrap(err)
+	}
+	return nil
+}
+
 func (app *application) mount() *echo.Echo {
 	e := echo.New()
+	e.JSONSerializer = strictJSONSerializer{}
 
 	api := e.Group("/api/v1")
 	api.GET("/healthz", app.exchange.Health)

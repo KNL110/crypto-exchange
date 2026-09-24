@@ -17,7 +17,9 @@ type Exchange struct {
 // NewExchange creates an Exchange with an empty order book for each symbol.
 func NewExchange() *Exchange {
 	books := make(map[Symbol]*SymbolBook)
-	books[SymETH] = newSymbolBook(SymETH)
+	for _, sym := range symbols {
+		books[sym] = newSymbolBook(sym)
+	}
 	return &Exchange{orderBooks: books}
 }
 
@@ -105,4 +107,15 @@ func (e *Exchange) cancelOrder(sym Symbol,orderID uint64) (*matchengine.Order,er
 		return nil,fmt.Errorf("CancelOrder (Exchange): %w",err)
 	}
 	return order,nil
+}
+
+func (e *Exchange) getOrderBook(sym Symbol) (*matchengine.OrderBook,error){
+	sb, err := e.symbolBook(sym)
+	if err != nil {
+		return nil,fmt.Errorf("GetOrderBook (Exchange): %w",err)
+	}
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	snap := *sb.book
+	return &snap,nil
 }

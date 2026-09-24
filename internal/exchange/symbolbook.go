@@ -11,9 +11,12 @@ import (
 // contend with each other.
 
 type Symbol string
-const(
-	SymETH = Symbol("ETH")
-)
+
+var symbols = []Symbol{
+	Symbol("ETH"), 
+	Symbol("BTC"),
+	Symbol("LTC"),
+}
 
 
 type SymbolBook struct {

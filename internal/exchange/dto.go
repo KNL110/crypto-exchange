@@ -20,6 +20,14 @@ type cancelOrderRequest struct {
 	OrderID uint64 `json:"orderId"`
 }
 
+type orderBookRequest struct {
+	Symbol string `json:"symbol"`
+}
+
+type ManyOrderBookRequest struct {
+	Symbols []string `json:"symbols"`
+}
+
 type orderResponse struct {
 	Id     uint64  `json:"id"`
 	Symbol string  `json:"symbol"`
@@ -76,6 +84,48 @@ type errorResponse struct {
 
 func newErrorResponse(err error) errorResponse {
 	return errorResponse{Error: err.Error()}
+}
+
+type limitResponse struct {
+	Price        float64         `json:"price"`
+	TotalVolumne int64           `json:"totalVolume"`
+	TotalOrders  int64           `json:"totalOrders"`
+	Orders       []orderResponse `json:"orders"`
+}
+
+func newLimitResponse(lim *matchengine.Limit, symbol Symbol) limitResponse {
+	res := limitResponse{
+		Price:        lim.Price,
+		TotalVolumne: lim.TotalVolume,
+		TotalOrders:  lim.Len,
+		Orders:       make([]orderResponse, 0, lim.Len),
+	}
+	orders := lim.Orders()
+	for i := range orders {
+		res.Orders = append(res.Orders, newOrderResponse(orders[i], symbol))
+	}
+	return res
+}
+
+type orderBookResponse struct {
+	Symbol string          `json:"symbol"`
+	Bids   []limitResponse `json:"bids"`
+	Asks   []limitResponse `json:"asks"`
+}
+
+func newOrderBookResponse(book *matchengine.OrderBook, symbol Symbol) orderBookResponse {
+	res := orderBookResponse{
+		Symbol: string(symbol),
+		Bids:   make([]limitResponse, 0, len(book.BidLimits)),
+		Asks:   make([]limitResponse, 0, len(book.AskLimits)),
+	}
+	for _, lim := range book.Bids() {
+		res.Bids = append(res.Bids, newLimitResponse(lim, symbol))
+	}
+	for _, lim := range book.Asks() {
+		res.Asks = append(res.Asks, newLimitResponse(lim, symbol))
+	}
+	return res
 }
 
 type healthResponse struct {

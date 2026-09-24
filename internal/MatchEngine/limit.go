@@ -7,7 +7,7 @@ import (
 type Limit struct {
 	Price       float64
 	TotalVolume int64
-	len         int64
+	Len         int64
 	head        *Order
 	tail        *Order
 }
@@ -18,7 +18,7 @@ func NewLimit(price float64) *Limit {
 		TotalVolume: 0,
 		head:        nil,
 		tail:        nil,
-		len:         0,
+		Len:         0,
 	}
 }
 
@@ -43,8 +43,16 @@ func (lim *Limit) AddOrder(order *Order) {
 		lim.tail = order
 	}
 
-	lim.len++
+	lim.Len++
 	lim.TotalVolume += order.Size
+}
+
+func (lim *Limit) Orders() []*Order { //TODO: optimize 
+	orders := make([]*Order, 0, lim.Len)
+	for o := lim.head; o != nil; o = o.next {
+		orders = append(orders, o)
+	}
+	return orders
 }
 
 func (lim *Limit) DeleteOrder(order *Order) error {
@@ -71,7 +79,7 @@ func (lim *Limit) DeleteOrder(order *Order) error {
 	order.prev = nil  //TODO: consider for performance affects due to garbage collection
 	order.next = nil
 
-	lim.len--
+	lim.Len--
 	lim.TotalVolume -= order.Size
 	return nil
 }

@@ -80,6 +80,41 @@ func (h *Handler) CancelOrder(c *echo.Context) error {
 		return h.mapError(c,err)
 	}
 	return c.JSON(http.StatusOK, newOrderResponse(order, symbol))
+}	
+
+func (h *Handler) OrderBook(c *echo.Context) error {
+	var req orderBookRequest
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
+	}
+	symbol := Symbol(req.Symbol)
+
+	orderBook, err := h.ex.getOrderBook(symbol)
+	if err != nil {
+		return h.mapError(c,err)
+	}
+	return c.JSON(http.StatusOK, newOrderBookResponse(orderBook, symbol))
+}
+
+func (h *Handler) ManyOrderBooks(c *echo.Context) error {
+	var req ManyOrderBookRequest
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
+	}
+
+	orderBooks := make(map[string]orderBookResponse)
+	for _, symStr := range req.Symbols {
+		symbol := Symbol(symStr)
+		orderBook, err := h.ex.getOrderBook(symbol)
+		if err != nil {
+			return h.mapError(c,err)
+		}
+		orderBooks[symStr] = newOrderBookResponse(orderBook, symbol)
+	}
+
+	return c.JSON(http.StatusOK, orderBooks)
 }
 // Health reports server status along with the configured trading symbols.
 func (h *Handler) Health(c *echo.Context) error {

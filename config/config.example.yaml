@@ -3,3 +3,7 @@ dbPath: <DATABASE_URL> # for local: "postgresql://<username>:<password>@localhos
 httpServer:
     address: "0.0.0.0"
     port: 8080
+ganacheServer:
+    address: "localhost"
+    port: 8545
+    privateKey: <PRIVATE_KEY>

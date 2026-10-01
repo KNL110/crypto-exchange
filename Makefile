@@ -1,7 +1,7 @@
 .PHONY: build build-cli run run-cli test test-race
 CONFIG ?= ./config/config.yaml
 build:
-	@go build -o ./bin/exchange ./cmd
+	@go build -o ./bin/exchange ./cmd/api
 
 build-cli:
 	@go build -o ./bin/exchangectl ./cmd/exchangectl

@@ -60,7 +60,7 @@ func (app *application) run() error {
 	router := app.mount()
 
 	app.server = &http.Server{
-		Addr:         app.config.GetAddr(),
+		Addr:         app.config.HttpServer.GetAddr(),
 		Handler:      router,
 		WriteTimeout: time.Second * 30,
 		ReadTimeout:  time.Second * 10,

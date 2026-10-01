@@ -1,26 +1,36 @@
 package exchange
 
 import (
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"sync/atomic"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
 )
 
 // Exchange coordinates trading across all configured symbols.
 type Exchange struct {
-	orderBooks map[Symbol]*SymbolBook
+	privateKey  *ecdsa.PrivateKey
+	orderBooks  map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
 }
 
 // NewExchange creates an Exchange with an empty order book for each symbol.
-func NewExchange() *Exchange {
+func NewExchange(privateKey string) (*Exchange, error) {
 	books := make(map[Symbol]*SymbolBook)
 	for _, sym := range symbols {
 		books[sym] = newSymbolBook(sym)
 	}
-	return &Exchange{orderBooks: books}
+	prvKey, err := crypto.HexToECDSA(privateKey)
+	if err != nil {
+		return nil,fmt.Errorf("failed to parse private key(Exchange): %w", err)
+	}
+	return &Exchange{
+		orderBooks: books,
+		privateKey: prvKey,
+	},nil
 }
 
 func (e *Exchange) symbolBook(symbol Symbol) (*SymbolBook, error) {
@@ -39,62 +49,63 @@ func (e *Exchange) Symbols() []Symbol {
 	}
 	return symbols
 }
-//TODO:consider the performance impact of copying the order struct in all these services
-func (e *Exchange) placeLimitOrder(isBid bool,price float64,size int64,sym Symbol) (*matchengine.Order,error){
+
+// TODO:consider the performance impact of copying the order struct in all these services
+func (e *Exchange) placeLimitOrder(isBid bool, price float64, size int64, sym Symbol) (*matchengine.Order, error) {
 	if size <= 0 {
-		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w",ErrInvalidSize)
+		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidSize)
 	}
 	if price <= 0 {
-		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w",ErrInvalidPrice)
+		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidPrice)
 	}
 
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w",err)
+		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
 	id := e.nextOrderID.Add(1)
-	order := matchengine.NewOrder(id,isBid,size)
+	order := matchengine.NewOrder(id, isBid, size)
 
-	if err = sb.book.PlaceLimitOrder(order,price); err != nil {
-		return nil,fmt.Errorf("PlaceLimitOrder (Exchange): %w",err)
+	if err = sb.book.PlaceLimitOrder(order, price); err != nil {
+		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
 	snap := *order
-	return &snap,nil
+	return &snap, nil
 }
 
-func (e *Exchange) placeMarketOrder(isBid bool,size int64,sym Symbol) ([]matchengine.MatchedOrder,*matchengine.Order,error){
+func (e *Exchange) placeMarketOrder(isBid bool, size int64, sym Symbol) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
 	if size <= 0 {
-		return nil,nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",ErrInvalidSize)
+		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidSize)
 	}
 
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return nil,nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
+		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
 	id := e.nextOrderID.Add(1)
-	order := matchengine.NewOrder(id,isBid,size)
+	order := matchengine.NewOrder(id, isBid, size)
 
 	matched, err := sb.book.PlaceMarketOrder(order)
 	if err != nil {
 		if errors.Is(err, matchengine.ErrInsufficientLiquidity) {
 			err = ErrInsufficientLiquidity
 		}
-		return nil,nil,fmt.Errorf("PlaceMarketOrder (Exchange): %w",err)
+		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
 	}
 	snap := *order
-	return matched,&snap,nil
+	return matched, &snap, nil
 }
 
-func (e *Exchange) cancelOrder(sym Symbol,orderID uint64) (*matchengine.Order,error){
+func (e *Exchange) cancelOrder(sym Symbol, orderID uint64) (*matchengine.Order, error) {
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return nil,fmt.Errorf("CancelOrder (Exchange): %w",err)
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
@@ -104,18 +115,18 @@ func (e *Exchange) cancelOrder(sym Symbol,orderID uint64) (*matchengine.Order,er
 		if errors.Is(err, matchengine.ErrOrderNotFound) {
 			err = ErrOrderNotFound
 		}
-		return nil,fmt.Errorf("CancelOrder (Exchange): %w",err)
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
-	return order,nil
+	return order, nil
 }
 
-func (e *Exchange) getOrderBook(sym Symbol) (*matchengine.OrderBook,error){
+func (e *Exchange) getOrderBook(sym Symbol) (*matchengine.OrderBook, error) {
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return nil,fmt.Errorf("GetOrderBook (Exchange): %w",err)
+		return nil, fmt.Errorf("GetOrderBook (Exchange): %w", err)
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 	snap := *sb.book
-	return &snap,nil
+	return &snap, nil
 }

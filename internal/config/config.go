@@ -17,6 +17,7 @@ type HttpServer struct {
 type GanacheServer struct {
 	Address string `yaml:"address" env:"GANACHE_HOST" env-default:"localhost"`
 	Port    string `yaml:"port" env:"GANACHE_PORT" env-default:"8545"`
+	PrivateKey string `yaml:"privateKey"`
 }
 
 // TODO: complete config struct with all the required fields,and validation

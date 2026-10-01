@@ -15,7 +15,10 @@ import (
 func main() {
 	cfg := config.MustLoad()
 
-	ex := exchange.NewExchange()
+	ex,err := exchange.NewExchange(cfg.GanacheServer.PrivateKey)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create exchange")
+	}
 	// if err := ex.Recover(cfg.WALPath, []byte(cfg.WALHMACKey)); err != nil {
 	// 	log.Fatal().Err(err).Msg("failed to recover exchange state from wal")
 	// }
@@ -26,7 +29,8 @@ func main() {
 	// }()
 
 	app := newApplication(cfg, exchange.NewHandler(ex))
-
+	ethClient := EthClient(cfg.GanacheServer.GetAddr())
+	transferEth(ethClient, cfg.GanacheServer.PrivateKey)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

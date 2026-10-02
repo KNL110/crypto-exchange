@@ -8,10 +8,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+	users "github.com/knl110/crypto-exchange/internal/users"
 )
 
 // Exchange coordinates trading across all configured symbols.
 type Exchange struct {
+	orders map[int64]int64
+	users map[int64][]*users.User
 	privateKey  *ecdsa.PrivateKey
 	orderBooks  map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
@@ -30,6 +33,8 @@ func NewExchange(privateKey string) (*Exchange, error) {
 	return &Exchange{
 		orderBooks: books,
 		privateKey: prvKey,
+		orders: make(map[int64]int64),
+		users: make(map[int64][]*users.User),
 	},nil
 }
 

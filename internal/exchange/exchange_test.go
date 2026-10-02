@@ -1,13 +1,33 @@
 package exchange
 
 import (
+	"encoding/hex"
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// symUnknown is not configured on the exchange.
-const symUnknown = Symbol("BTC")
+const (
+	symETH = Symbol("ETH")
+	// symUnknown is not configured on the exchange.
+	symUnknown = Symbol("DOGE")
+)
+
+// newTestExchange returns an Exchange backed by a freshly generated private key.
+func newTestExchange(t *testing.T) *Exchange {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	ex, err := NewExchange(hex.EncodeToString(crypto.FromECDSA(key)))
+	if err != nil {
+		t.Fatalf("NewExchange: %v", err)
+	}
+	return ex
+}
 
 // bookVolume returns the total resting size on each side of sym's book.
 func bookVolume(t *testing.T, ex *Exchange, sym Symbol) (bids, asks int64) {
@@ -21,25 +41,26 @@ func bookVolume(t *testing.T, ex *Exchange, sym Symbol) (bids, asks int64) {
 	return sb.book.BidTotalVolume(), sb.book.AskTotalVolume()
 }
 
-func TestNewExchangeRegistersOnlyETH(t *testing.T) {
-	ex := NewExchange()
+func TestNewExchangeRegistersConfiguredSymbols(t *testing.T) {
+	ex := newTestExchange(t)
 
-	syms := ex.Symbols()
-	if len(syms) != 1 || syms[0] != SymETH {
-		t.Fatalf("Symbols() = %v, want [%s]", syms, SymETH)
+	if syms := ex.Symbols(); len(syms) != len(symbols) {
+		t.Fatalf("Symbols() = %v, want %v", syms, symbols)
 	}
-	if _, err := ex.symbolBook(SymETH); err != nil {
-		t.Fatalf("symbolBook(ETH): %v", err)
+	for _, sym := range symbols {
+		if _, err := ex.symbolBook(sym); err != nil {
+			t.Fatalf("symbolBook(%s): %v", sym, err)
+		}
 	}
 	if _, err := ex.symbolBook(symUnknown); !errors.Is(err, ErrUnknownSymbol) {
-		t.Fatalf("symbolBook(BTC): err = %v, want ErrUnknownSymbol", err)
+		t.Fatalf("symbolBook(%s): err = %v, want ErrUnknownSymbol", symUnknown, err)
 	}
 }
 
 func TestPlaceLimitOrderRests(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
-	order, err := ex.placeLimitOrder(false, 3_500, 10, SymETH)
+	order, err := ex.placeLimitOrder(false, 3_500, 10, symETH)
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
@@ -50,20 +71,20 @@ func TestPlaceLimitOrderRests(t *testing.T) {
 		t.Fatalf("order not resting at 3500: %+v", order.Limit)
 	}
 
-	bids, asks := bookVolume(t, ex, SymETH)
+	bids, asks := bookVolume(t, ex, symETH)
 	if bids != 0 || asks != 10 {
 		t.Fatalf("volume = bids %d / asks %d, want 0 / 10", bids, asks)
 	}
 }
 
 func TestPlaceLimitOrderAssignsUniqueIDs(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
-	a, err := ex.placeLimitOrder(true, 100, 1, SymETH)
+	a, err := ex.placeLimitOrder(true, 100, 1, symETH)
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
-	b, err := ex.placeLimitOrder(true, 100, 1, SymETH)
+	b, err := ex.placeLimitOrder(true, 100, 1, symETH)
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
@@ -73,12 +94,12 @@ func TestPlaceLimitOrderAssignsUniqueIDs(t *testing.T) {
 }
 
 func TestPlaceLimitOrderRejectsBadInput(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
-	if _, err := ex.placeLimitOrder(true, 100, 0, SymETH); !errors.Is(err, ErrInvalidSize) {
+	if _, err := ex.placeLimitOrder(true, 100, 0, symETH); !errors.Is(err, ErrInvalidSize) {
 		t.Errorf("size=0: err = %v, want ErrInvalidSize", err)
 	}
-	if _, err := ex.placeLimitOrder(true, 0, 10, SymETH); !errors.Is(err, ErrInvalidPrice) {
+	if _, err := ex.placeLimitOrder(true, 0, 10, symETH); !errors.Is(err, ErrInvalidPrice) {
 		t.Errorf("price=0: err = %v, want ErrInvalidPrice", err)
 	}
 	if _, err := ex.placeLimitOrder(true, 100, 10, symUnknown); !errors.Is(err, ErrUnknownSymbol) {
@@ -87,15 +108,15 @@ func TestPlaceLimitOrderRejectsBadInput(t *testing.T) {
 }
 
 func TestPlaceMarketOrderFillsAcrossLevels(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
 	for _, p := range []float64{3_500, 3_450, 3_400} {
-		if _, err := ex.placeLimitOrder(false, p, 10, SymETH); err != nil {
+		if _, err := ex.placeLimitOrder(false, p, 10, symETH); err != nil {
 			t.Fatalf("placeLimitOrder: %v", err)
 		}
 	}
 
-	matches, order, err := ex.placeMarketOrder(true, 15, SymETH)
+	matches, order, err := ex.placeMarketOrder(true, 15, symETH)
 	if err != nil {
 		t.Fatalf("placeMarketOrder: %v", err)
 	}
@@ -115,15 +136,15 @@ func TestPlaceMarketOrderFillsAcrossLevels(t *testing.T) {
 		t.Fatalf("first fill = %+v, want price 3400", matches)
 	}
 
-	if _, asks := bookVolume(t, ex, SymETH); asks != 15 {
+	if _, asks := bookVolume(t, ex, symETH); asks != 15 {
 		t.Fatalf("remaining ask volume = %d, want 15", asks)
 	}
 }
 
 func TestPlaceMarketOrderRejectsBadInput(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
-	if _, _, err := ex.placeMarketOrder(true, 0, SymETH); !errors.Is(err, ErrInvalidSize) {
+	if _, _, err := ex.placeMarketOrder(true, 0, symETH); !errors.Is(err, ErrInvalidSize) {
 		t.Errorf("size=0: err = %v, want ErrInvalidSize", err)
 	}
 	if _, _, err := ex.placeMarketOrder(true, 10, symUnknown); !errors.Is(err, ErrUnknownSymbol) {
@@ -132,31 +153,31 @@ func TestPlaceMarketOrderRejectsBadInput(t *testing.T) {
 }
 
 func TestPlaceMarketOrderInsufficientLiquidityLeavesBookUntouched(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
-	if _, err := ex.placeLimitOrder(false, 3_500, 5, SymETH); err != nil {
+	if _, err := ex.placeLimitOrder(false, 3_500, 5, symETH); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 
-	_, _, err := ex.placeMarketOrder(true, 100, SymETH)
+	_, _, err := ex.placeMarketOrder(true, 100, symETH)
 	if !errors.Is(err, ErrInsufficientLiquidity) {
 		t.Fatalf("placeMarketOrder: err = %v, want ErrInsufficientLiquidity", err)
 	}
 
-	if _, asks := bookVolume(t, ex, SymETH); asks != 5 {
+	if _, asks := bookVolume(t, ex, symETH); asks != 5 {
 		t.Fatalf("ask volume = %d, want resting order untouched at 5", asks)
 	}
 }
 
 func TestCancelOrderRemovesFromBook(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
-	order, err := ex.placeLimitOrder(true, 3_000, 10, SymETH)
+	order, err := ex.placeLimitOrder(true, 3_000, 10, symETH)
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 
-	cancelled, err := ex.cancelOrder(SymETH, order.ID)
+	cancelled, err := ex.cancelOrder(symETH, order.ID)
 	if err != nil {
 		t.Fatalf("cancelOrder: %v", err)
 	}
@@ -164,11 +185,11 @@ func TestCancelOrderRemovesFromBook(t *testing.T) {
 		t.Fatalf("cancelled ID = %d, want %d", cancelled.ID, order.ID)
 	}
 
-	if bids, _ := bookVolume(t, ex, SymETH); bids != 0 {
+	if bids, _ := bookVolume(t, ex, symETH); bids != 0 {
 		t.Fatalf("bid volume after cancel = %d, want 0", bids)
 	}
 
-	if _, err := ex.cancelOrder(SymETH, order.ID); !errors.Is(err, ErrOrderNotFound) {
+	if _, err := ex.cancelOrder(symETH, order.ID); !errors.Is(err, ErrOrderNotFound) {
 		t.Fatalf("double cancel: err = %v, want ErrOrderNotFound", err)
 	}
 	if _, err := ex.cancelOrder(symUnknown, order.ID); !errors.Is(err, ErrUnknownSymbol) {
@@ -177,7 +198,7 @@ func TestCancelOrderRemovesFromBook(t *testing.T) {
 }
 
 func TestConcurrentOrdersSameSymbol(t *testing.T) {
-	ex := NewExchange()
+	ex := newTestExchange(t)
 
 	const n = 50
 	var wg sync.WaitGroup
@@ -191,14 +212,14 @@ func TestConcurrentOrdersSameSymbol(t *testing.T) {
 			if isBid {
 				price = float64(2_999 - i)
 			}
-			if _, err := ex.placeLimitOrder(isBid, price, 1, SymETH); err != nil {
+			if _, err := ex.placeLimitOrder(isBid, price, 1, symETH); err != nil {
 				t.Errorf("placeLimitOrder: %v", err)
 			}
 		}(i)
 	}
 	wg.Wait()
 
-	bids, asks := bookVolume(t, ex, SymETH)
+	bids, asks := bookVolume(t, ex, symETH)
 	if bids+asks != n {
 		t.Fatalf("total resting size = %d, want %d", bids+asks, n)
 	}

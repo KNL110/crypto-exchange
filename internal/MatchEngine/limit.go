@@ -6,8 +6,8 @@ import (
 
 type Limit struct {
 	Price       float64
-	TotalVolume int64
-	Len         int64
+	TotalVolume uint64
+	Len         uint64
 	head        *Order
 	tail        *Order
 }

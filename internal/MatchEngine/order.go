@@ -9,7 +9,7 @@ import (
 type Order struct {
 	ID        uint64
 	UserId    uint64
-	Size      int64
+	Size      uint64
 	IsBid     bool
 	Limit     *Limit
 	Timestamp int64
@@ -18,7 +18,7 @@ type Order struct {
 	next *Order
 }
 
-func NewOrder(id uint64, isbid bool, size int64) *Order {
+func NewOrder(id uint64, isbid bool, size uint64) *Order {
 	return &Order{
 		ID:        id,
 		Size:      size,

@@ -158,16 +158,16 @@ func (ordBook *OrderBook) PlaceMarketOrder(order *Order) ([]MatchedOrder, error)
 	return matches, nil
 }
 
-func (ordBook *OrderBook) BidTotalVolume() int64 {
-	var total int64 = 0
+func (ordBook *OrderBook) BidTotalVolume() uint64 {
+	var total uint64 = 0
 	for _, lim := range ordBook.bids {
 		total += lim.TotalVolume
 	}
 	return total
 }
 
-func (ordBook *OrderBook) AskTotalVolume() int64 {
-	var total int64 = 0
+func (ordBook *OrderBook) AskTotalVolume() uint64 {
+	var total uint64 = 0
 	for _, lim := range ordBook.asks {
 		total += lim.TotalVolume
 	}

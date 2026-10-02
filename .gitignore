@@ -41,3 +41,6 @@ go.work.sum
 /internal/MatchEngine/BPLUSTREE_TUTORIAL.md
 /.context
 /config/config.yaml
+
+# test files
+*_test.go

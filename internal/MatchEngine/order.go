@@ -18,9 +18,10 @@ type Order struct {
 	next *Order
 }
 
-func NewOrder(id uint64, isbid bool, size uint64) *Order {
+func NewOrder(id uint64, isbid bool, size uint64, userId uint64) *Order {
 	return &Order{
 		ID:        id,
+		UserId:    userId,
 		Size:      size,
 		IsBid:     isbid,
 		Limit:     nil,

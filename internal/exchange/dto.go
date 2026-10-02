@@ -7,17 +7,20 @@ type placeLimitOrderRequest struct {
 	IsBid  bool    `json:"isBid"`
 	Size   uint64   `json:"size"`
 	Price  float64 `json:"price"`
+	UserId uint64  `json:"userId"`
 }
 
 type placeMarketOrderRequest struct {
 	Symbol string `json:"symbol"`
 	IsBid  bool   `json:"isBid"`
 	Size   uint64  `json:"size"`
+	UserId uint64 `json:"userId"`
 }
 
 type cancelOrderRequest struct {
 	Symbol  string `json:"symbol"`
 	OrderID uint64 `json:"orderId"`
+	UserId uint64 `json:"userId"`
 }
 
 type orderBookRequest struct {

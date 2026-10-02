@@ -13,8 +13,7 @@ import (
 
 // Exchange coordinates trading across all configured symbols.
 type Exchange struct {
-	orders map[uint64]uint64
-	users map[uint64][]*users.User
+	users map[uint64]*users.User
 	privateKey  *ecdsa.PrivateKey
 	orderBooks  map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
@@ -33,8 +32,7 @@ func NewExchange(privateKey string) (*Exchange, error) {
 	return &Exchange{
 		orderBooks: books,
 		privateKey: prvKey,
-		orders: make(map[uint64]uint64),
-		users: make(map[uint64][]*users.User),
+		users: make(map[uint64]*users.User),
 	},nil
 }
 

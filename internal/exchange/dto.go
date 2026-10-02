@@ -5,14 +5,14 @@ import matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
 type placeLimitOrderRequest struct {
 	Symbol string  `json:"symbol"`
 	IsBid  bool    `json:"isBid"`
-	Size   int64   `json:"size"`
+	Size   uint64   `json:"size"`
 	Price  float64 `json:"price"`
 }
 
 type placeMarketOrderRequest struct {
 	Symbol string `json:"symbol"`
 	IsBid  bool   `json:"isBid"`
-	Size   int64  `json:"size"`
+	Size   uint64  `json:"size"`
 }
 
 type cancelOrderRequest struct {
@@ -32,7 +32,7 @@ type orderResponse struct {
 	Id     uint64  `json:"id"`
 	Symbol string  `json:"symbol"`
 	Side   string  `json:"side"`
-	Size   int64   `json:"size"`
+	Size   uint64   `json:"size"`
 	Price  float64 `json:"price,omitempty"`
 }
 
@@ -56,7 +56,7 @@ type placeMarketOrderResponse struct {
 }
 
 type matchedOrderResponse struct {
-	SizeFilled int64   `json:"sizeFilled"`
+	SizeFilled uint64   `json:"sizeFilled"`
 	Price      float64 `json:"price"`
 }
 
@@ -88,8 +88,8 @@ func newErrorResponse(err error) errorResponse {
 
 type limitResponse struct {
 	Price        float64         `json:"price"`
-	TotalVolumne int64           `json:"totalVolume"`
-	TotalOrders  int64           `json:"totalOrders"`
+	TotalVolumne uint64           `json:"totalVolume"`
+	TotalOrders  uint64           `json:"totalOrders"`
 	Orders       []orderResponse `json:"orders"`
 }
 

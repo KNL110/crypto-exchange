@@ -56,7 +56,7 @@ func (e *Exchange) Symbols() []Symbol {
 }
 
 // TODO:consider the performance impact of copying the order struct in all these services
-func (e *Exchange) placeLimitOrder(isBid bool, price float64, size int64, sym Symbol) (*matchengine.Order, error) {
+func (e *Exchange) placeLimitOrder(isBid bool, price float64, size uint64, sym Symbol) (*matchengine.Order, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidSize)
 	}
@@ -81,7 +81,7 @@ func (e *Exchange) placeLimitOrder(isBid bool, price float64, size int64, sym Sy
 	return &snap, nil
 }
 
-func (e *Exchange) placeMarketOrder(isBid bool, size int64, sym Symbol) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
+func (e *Exchange) placeMarketOrder(isBid bool, size uint64, sym Symbol) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
 	if size <= 0 {
 		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidSize)
 	}

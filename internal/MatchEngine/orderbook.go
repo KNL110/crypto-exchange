@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // OrderBook holds all price levels for both sides of the market.
@@ -96,7 +98,7 @@ func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price uint64) ([]Matched
 // filled and ErrInsufficientLiquidity is returned.
 func (ordBook *OrderBook) PlaceMarketOrder(order *Order, worstPrice uint64) ([]MatchedOrder, error) {
 	ordBook.purgeExpired(!order.IsBid)
-	if order.Size > ordBook.crossableVolume(order.IsBid, worstPrice) {
+	if order.Size > ordBook.crossableVolume(order.IsBid, worstPrice, order.Maker) {
 		return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
 	}
 	return ordBook.match(order, worstPrice), nil
@@ -120,34 +122,46 @@ func (ordBook *OrderBook) opposite(isBid bool) []*Limit {
 	return ordBook.Bids()
 }
 
-// crossableVolume is the resting volume an incoming order could trade against
-// without going past price.
-func (ordBook *OrderBook) crossableVolume(isBid bool, price uint64) uint64 {
+// crossableVolume is the resting volume an incoming order from maker could
+// trade against without going past price. The maker's own resting orders
+// don't count: self-trade prevention cancels them instead of filling.
+func (ordBook *OrderBook) crossableVolume(isBid bool, price uint64, maker common.Address) uint64 {
 	var total uint64
 	for _, lim := range ordBook.opposite(isBid) {
 		if !crosses(isBid, lim.Price, price) {
 			break
 		}
 		total += lim.TotalVolume
+		for o := lim.head; o != nil; o = o.next {
+			if o.Maker == maker {
+				total -= o.Size
+			}
+		}
 	}
 	return total
 }
 
 // match trades order against the opposite side, best price first, until it
-// is filled or the next level is past price. Filled resting orders and
-// emptied levels are removed from the book.
+// is filled or the next level is past price. Filled resting orders, the
+// maker's own crossing orders (self-trade prevention) and emptied levels are
+// removed from the book.
 func (ordBook *OrderBook) match(order *Order, price uint64) []MatchedOrder {
 	matches := []MatchedOrder{}
+	cancelled := []*Order{}
 	toDelete := []*Limit{}
 
 	for _, lim := range ordBook.opposite(order.IsBid) {
 		if order.IsFilled() || !crosses(order.IsBid, lim.Price, price) {
 			break
 		}
-		lim.FillOrder(order, &matches)
+		lim.FillOrder(order, &matches, &cancelled)
 		if lim.IsEmpty() {
 			toDelete = append(toDelete, lim)
 		}
+	}
+
+	for _, o := range cancelled {
+		delete(ordBook.orders, o.ID)
 	}
 
 	for _, m := range matches {

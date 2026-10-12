@@ -108,10 +108,19 @@ func (lim *Limit) fillOrder(ordIncoming, ordResting *Order) MatchedOrder {
 	return matched
 }
 
-func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder) {
+// FillOrder fills order against this level's resting orders, oldest first.
+// Self-trade prevention: a resting order from the same maker is never traded
+// against; it is removed from the level and appended to cancelled instead.
+func (lim *Limit) FillOrder(order *Order, matches *[]MatchedOrder, cancelled *[]*Order) {
 
 	for o := lim.head; o != nil; {
 		next := o.next
+		if o.Maker == order.Maker {
+			lim.DeleteOrder(o)
+			*cancelled = append(*cancelled, o)
+			o = next
+			continue
+		}
 		matched := lim.fillOrder(order, o)
 		*matches = append(*matches, matched)
 

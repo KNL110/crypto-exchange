@@ -182,6 +182,14 @@ func (ordBook *OrderBook) match(order *Order, price uint64) []MatchedOrder {
 	return matches
 }
 
+// PurgeExpired removes expired orders from both sides of the book. Matching
+// already purges the side it trades against; call this before showing the
+// book so expired orders on the other side don't appear either.
+func (ordBook *OrderBook) PurgeExpired() {
+	ordBook.purgeExpired(true)
+	ordBook.purgeExpired(false)
+}
+
 // purgeExpired removes every expired order from one side of the book, so
 // matching never trades against an order its maker no longer stands behind.
 // TODO: this walks the whole side on every incoming order; index orders by

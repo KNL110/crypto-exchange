@@ -23,13 +23,18 @@ Matching is deterministic: given the same sequence of place/cancel actions again
 ```text
 internal/
   MatchEngine/   core order book + matching (above)
-  config/        YAML config loading
-  exchange/      owns one order book per symbol (ETH, BTC, LTC), assigns
-                 order IDs, verifies EIP-712 signatures, logs every action
-                 to the WAL and replays it on startup, HTTP handlers,
-                 DTOs and routes
+  symbol/        the traded symbols (ETH, BTC, LTC) and each symbol's book + lock
+  signing/       EIP-712 Order/Cancel types and signer recovery
+    signingtest/ test wallet that signs orders, shared by the tests
+  exchange/      the trading service: place/cancel orders, book snapshots,
+                 signature/expiry/nonce checks, order IDs; journals every
+                 action and can replay it (knows nothing about HTTP or files)
+  recovery/      persists actions to the WAL and replays it into the
+                 exchange on startup
+  api/           HTTP layer: handlers, DTOs, routes, error -> status mapping
   wal/           write-ahead log: append (fsynced) + replay, optional HMAC chain
   logging/       zerolog setup + one log line per HTTP request
+  config/        YAML config loading
 cmd/
   api/           exchange server: wires everything together, graceful
                  shutdown, Ethereum client (reads the chain ID for signing)
@@ -105,7 +110,7 @@ GET endpoints take query parameters. All request bodies must be sent as JSON wit
 | `POST` | `/api/v1/exchange/orders/market` | signed order, `isMarket: true` | place a market order (fills now, within the worst price) |
 | `DELETE` | `/api/v1/exchange/orders/cancel` | signed cancel | cancel one of your resting orders |
 
-Request/response shapes are in `internal/exchange/dto.go`. Both order endpoints respond with:
+Request/response shapes are in `internal/api/dto.go`. Both order endpoints respond with:
 
 ```json
 { "order": { … }, "matches": [ { "sizeFilled": 10, "price": 3500 } ], "cancelled": [ { … } ] }
@@ -115,7 +120,7 @@ Request/response shapes are in `internal/exchange/dto.go`. Both order endpoints 
 
 ### Signed orders
 
-There are no accounts. A user is their wallet address, and every order and cancel must be signed by that wallet with [EIP-712](https://eips.ethereum.org/EIPS/eip-712) (`eth_signTypedData_v4`). The server recovers the signer and rejects the request unless it matches `maker`. Types are defined in `internal/exchange/signing.go`:
+There are no accounts. A user is their wallet address, and every order and cancel must be signed by that wallet with [EIP-712](https://eips.ethereum.org/EIPS/eip-712) (`eth_signTypedData_v4`). The server recovers the signer and rejects the request unless it matches `maker`. Types are defined in `internal/signing/signing.go`:
 
 ```text
 EIP712Domain { name: "CryptoExchange", version: "1", chainId }   // chainId read from the node
@@ -163,7 +168,7 @@ Cancel request body:
 The order books live in memory and are rebuilt on startup from a write-ahead log (`internal/wal`, default `./data/wal.log`):
 
 - Every accepted order and cancel is appended to the log, fsynced, **before** it touches the book. Each record is the action exactly as the maker signed it (maker, side, size, price, nonce, expiry, signature), plus its order ID and the time it was applied.
-- On startup, `Exchange.Recover` replays the log through the same code as live requests, at each record's original time. Matching is deterministic, so the same records in the same order rebuild the same books.
+- On startup, `recovery.Recover` replays the log through the same code as live requests, at each record's original time. Matching is deterministic, so the same records in the same order rebuild the same books.
 - Replay also rebuilds the used nonces, so a signed order can't be resubmitted after a restart. The order ID counter resumes after the highest recovered ID.
 - A half-written last line left by a crash is ignored. Corruption anywhere else stops startup.
 

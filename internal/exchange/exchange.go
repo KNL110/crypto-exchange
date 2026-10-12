@@ -223,5 +223,6 @@ func (e *Exchange) getOrderBook(sym Symbol) (orderBookResponse, error) {
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
+	sb.book.PurgeExpired()
 	return newOrderBookResponse(sb.book, sym), nil
 }

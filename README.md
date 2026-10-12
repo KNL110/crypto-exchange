@@ -12,7 +12,8 @@ The core matching logic lives in `internal/MatchEngine` (package `matchengine`) 
   - `PlaceLimitOrder(order, price)` first trades the order against the opposite side at every price level its limit allows (a buy against asks ≤ price, a sell against bids ≥ price), each fill at the resting order's price. Whatever is left rests at `price`. Returns the fills.
   - `PlaceMarketOrder(order, worstPrice)` fills the whole order immediately, best price first, never past `worstPrice`. If the book can't fill all of it within that bound, nothing is filled and it returns `ErrInsufficientLiquidity`.
   - Prices are whole numbers of ticks (`uint64`), never floats.
-  - Expired resting orders are removed before matching, so they never trade.
+  - Expired resting orders are removed before matching, so they never trade, and before the book is shown.
+  - Self-trade prevention: an order never fills against a resting order from the same maker. That resting order is cancelled instead, and it doesn't count as liquidity for a market order.
   - `CancelOrder(id)` / `GetOrder(id)` remove/look up a resting order by ID.
 
 Matching is deterministic: given the same sequence of place/cancel actions against an empty book, you always end up in the same state.

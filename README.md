@@ -95,7 +95,13 @@ GET endpoints take query parameters. All request bodies must be sent as JSON wit
 | `POST` | `/api/v1/exchange/orders/market` | signed order, `isMarket: true` | place a market order (fills now, within the worst price) |
 | `DELETE` | `/api/v1/exchange/orders/cancel` | signed cancel | cancel one of your resting orders |
 
-Request/response shapes are in `internal/exchange/dto.go`.
+Request/response shapes are in `internal/exchange/dto.go`. Both order endpoints respond with:
+
+```json
+{ "order": { … }, "matches": [ { "sizeFilled": 10, "price": 3500 } ], "cancelled": [ { … } ] }
+```
+
+`order` is the order after matching (`size` = unfilled, `filled` = traded). `cancelled` lists your own resting orders that self-trade prevention removed.
 
 ### Signed orders
 

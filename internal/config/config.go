@@ -45,15 +45,16 @@ func (srv *GanacheServer) GetAddr() string {
 
 //TODO: check for what to do with ganache server
 func (cfg *Config) checkEnv() {
-	if cfg.Env == "dev" && cfg.HttpServer.Addr == "localhost" {
-		log.Printf("develepoment Environment, addr: %s", cfg.HttpServer.GetAddr())
-	} else if cfg.Env == "prod" {
+	switch cfg.Env {
+	case "dev":
+		log.Printf("development Environment, addr: %s", cfg.HttpServer.GetAddr())
+	case "prod":
 		if cfg.HttpServer.Addr != "0.0.0.0" {
 			cfg.HttpServer.Addr = "0.0.0.0"
 			log.Printf("setting address to %s", cfg.HttpServer.Addr)
 		}
 		log.Println("Production Environment")
-	} else {
+	default:
 		log.Fatalf("invalid Env value: %s", cfg.Env)
 	}
 }

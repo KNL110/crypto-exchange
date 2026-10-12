@@ -1,6 +1,6 @@
 # CryptoExchange
 
-A small crypto exchange written in Go: an in-memory limit order book matching engine, wrapped in an HTTP API with graceful shutdown. Users are wallet addresses: every order and cancel is an EIP-712 message signed by the user's wallet, and the server never holds user keys.
+A small crypto exchange written in Go: an in-memory limit order book matching engine, wrapped in an HTTP API with graceful shutdown and crash recovery from a write-ahead log. Users are wallet addresses: every order and cancel is an EIP-712 message signed by the user's wallet, and the server never holds user keys.
 
 ## Matching engine
 
@@ -25,8 +25,10 @@ internal/
   MatchEngine/   core order book + matching (above)
   config/        YAML config loading
   exchange/      owns one order book per symbol (ETH, BTC, LTC), assigns
-                 order IDs, verifies EIP-712 signatures, HTTP handlers,
+                 order IDs, verifies EIP-712 signatures, logs every action
+                 to the WAL and replays it on startup, HTTP handlers,
                  DTOs and routes
+  wal/           write-ahead log: append (fsynced) + replay, optional HMAC chain
 cmd/
   api/           exchange server: wires everything together, graceful
                  shutdown, Ethereum client (reads the chain ID for signing)
@@ -54,7 +56,7 @@ CONFIG_PATH=./config/config.yaml ./bin/exchange
 # or: ./bin/exchange -config ./config/config.yaml
 ```
 
-Shut it down with `Ctrl+C` (`SIGINT`) or `SIGTERM` for a graceful drain.
+Shut it down with `Ctrl+C` (`SIGINT`) or `SIGTERM` for a graceful drain. `kill -9` is safe too: the order books come back on the next start (see [Persistence](#persistence)).
 
 ### Configuration
 
@@ -70,6 +72,7 @@ ganacheServer:
     address: "localhost"
     port: 8545
     privateKey: <PRIVATE_KEY>
+walPath: "./data/wal.log"
 ```
 
 Some fields can be overridden with environment variables:
@@ -81,6 +84,8 @@ Some fields can be overridden with environment variables:
 | `DB_PATH` | *(required)* | database URL |
 | `GANACHE_HOST` | `localhost` | Ganache node host |
 | `GANACHE_PORT` | `8545` | Ganache node port |
+| `WAL_PATH` | `./data/wal.log` | write-ahead log file (parent dir is created) |
+| `WAL_HMAC_KEY` | *(unset)* | secret that makes the WAL tamper-evident, see [Persistence](#persistence) |
 
 ## API
 
@@ -147,6 +152,21 @@ Cancel request body:
 | `403` | cancel for an order you don't own |
 | `409` | nonce already used, or not enough liquidity for a market order |
 | `400` | bad size/price, expired order, `isMarket` doesn't match the endpoint |
+
+## Persistence
+
+The order books live in memory and are rebuilt on startup from a write-ahead log (`internal/wal`, default `./data/wal.log`):
+
+- Every accepted order and cancel is appended to the log, fsynced, **before** it touches the book. Each record is the action exactly as the maker signed it (maker, side, size, price, nonce, expiry, signature), plus its order ID and the time it was applied.
+- On startup, `Exchange.Recover` replays the log through the same code as live requests, at each record's original time. Matching is deterministic, so the same records in the same order rebuild the same books.
+- Replay also rebuilds the used nonces, so a signed order can't be resubmitted after a restart. The order ID counter resumes after the highest recovered ID.
+- A half-written last line left by a crash is ignored. Corruption anywhere else stops startup.
+
+Tampering with the log:
+
+- **Without any key**, editing or inventing an order or cancel fails on replay, because each record's signature is verified again and only the maker's wallet can produce it. The server refuses to start.
+- **Deleting, reordering or duplicating** validly signed records can't be caught by their signatures. Set `WAL_HMAC_KEY` (`openssl rand -hex 32`) to chain every record to the one before it with HMAC-SHA256; any break stops startup. Keep the key out of the WAL's directory and backups. Turning it on against an existing unsigned log fails by design, so start a fresh log when you enable it.
+- Truncating the end of the log back to an earlier valid point can't be detected without an external checkpoint.
 
 ### Not done yet
 

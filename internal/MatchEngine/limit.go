@@ -4,15 +4,16 @@ import (
 	"fmt"
 )
 
+// Limit is one price level. Price is a whole number of ticks, never a float.
 type Limit struct {
-	Price       float64
+	Price       uint64
 	TotalVolume uint64
 	Len         uint64
 	head        *Order
 	tail        *Order
 }
 
-func NewLimit(price float64) *Limit {
+func NewLimit(price uint64) *Limit {
 	return &Limit{
 		Price:       price,
 		TotalVolume: 0,
@@ -23,7 +24,7 @@ func NewLimit(price float64) *Limit {
 }
 
 func (lim *Limit) String() string {
-	return fmt.Sprintf("Limit[Price: %.2f, TotalVolume: %d]", lim.Price, lim.TotalVolume)
+	return fmt.Sprintf("Limit[Price: %d, TotalVolume: %d]", lim.Price, lim.TotalVolume)
 }
 
 func (lim *Limit) IsEmpty() bool {
@@ -95,17 +96,12 @@ func (lim *Limit) fillOrder(ordIncoming, ordResting *Order) MatchedOrder {
 		matched.Ask = ordIncoming
 	}
 
-	if ordIncoming.Size >= ordResting.Size {
-		matched.SizeFilled = ordResting.Size
-		matched.Price = lim.Price
-		ordIncoming.Size -= ordResting.Size
-		ordResting.Size = 0
-	} else {
-		matched.SizeFilled = ordIncoming.Size
-		matched.Price = lim.Price
-		ordResting.Size -= ordIncoming.Size
-		ordIncoming.Size = 0
-	}
+	matched.SizeFilled = min(ordIncoming.Size, ordResting.Size)
+	matched.Price = lim.Price
+	ordIncoming.Size -= matched.SizeFilled
+	ordResting.Size -= matched.SizeFilled
+	ordIncoming.Filled += matched.SizeFilled
+	ordResting.Filled += matched.SizeFilled
 
 	lim.TotalVolume -= matched.SizeFilled
 

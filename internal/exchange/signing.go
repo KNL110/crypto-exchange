@@ -29,6 +29,7 @@ var eip712Types = apitypes.Types{
 		{Name: "maker", Type: "address"},
 		{Name: "symbol", Type: "string"},
 		{Name: "isBid", Type: "bool"},
+		{Name: "isMarket", Type: "bool"},
 		{Name: "size", Type: "uint256"},
 		{Name: "price", Type: "uint256"},
 		{Name: "nonce", Type: "uint256"},
@@ -41,16 +42,19 @@ var eip712Types = apitypes.Types{
 	},
 }
 
-// OrderMessage is the order a maker signs. Price is in integer quote units;
-// a market order signs price 0. Expiry is a unix timestamp in seconds.
+// OrderMessage is the order a maker signs. Price is a whole number of ticks:
+// a limit order's limit price, or for a market order the worst price the maker
+// accepts. IsMarket is signed so one kind can't be submitted as the other.
+// Expiry is a unix timestamp in seconds.
 type OrderMessage struct {
-	Maker  common.Address
-	Symbol Symbol
-	IsBid  bool
-	Size   uint64
-	Price  uint64
-	Nonce  uint64
-	Expiry uint64
+	Maker    common.Address
+	Symbol   Symbol
+	IsBid    bool
+	IsMarket bool
+	Size     uint64
+	Price    uint64
+	Nonce    uint64
+	Expiry   uint64
 }
 
 // CancelMessage is what a maker signs to cancel one of their resting orders.
@@ -80,11 +84,12 @@ func (m OrderMessage) typedData(chainID *big.Int) apitypes.TypedData {
 		Message: apitypes.TypedDataMessage{
 			"maker":  m.Maker.Hex(),
 			"symbol": string(m.Symbol),
-			"isBid":  m.IsBid,
-			"size":   u256(m.Size),
-			"price":  u256(m.Price),
-			"nonce":  u256(m.Nonce),
-			"expiry": u256(m.Expiry),
+			"isBid":    m.IsBid,
+			"isMarket": m.IsMarket,
+			"size":     u256(m.Size),
+			"price":    u256(m.Price),
+			"nonce":    u256(m.Nonce),
+			"expiry":   u256(m.Expiry),
 		},
 	}
 }

@@ -3,24 +3,30 @@ package matchengine
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // OrderBook holds all price levels for both sides of the market.
+// Prices are whole numbers of ticks.
 type OrderBook struct {
 	asks      []*Limit
 	bids      []*Limit
-	AskLimits map[float64]*Limit
-	BidLimits map[float64]*Limit
+	AskLimits map[uint64]*Limit
+	BidLimits map[uint64]*Limit
 	orders    map[uint64]*Order
+
+	// now returns the current unix time in seconds; tests replace it.
+	now func() uint64
 }
 
 func NewOrderBook() *OrderBook {
 	return &OrderBook{
 		asks:      []*Limit{},
 		bids:      []*Limit{},
-		AskLimits: make(map[float64]*Limit),
-		BidLimits: make(map[float64]*Limit),
+		AskLimits: make(map[uint64]*Limit),
+		BidLimits: make(map[uint64]*Limit),
 		orders:    make(map[uint64]*Order),
+		now:       func() uint64 { return uint64(time.Now().Unix()) },
 	}
 }
 
@@ -43,14 +49,24 @@ func (ordBook *OrderBook) GetOrder(id uint64) (*Order, bool) {
 	return order, ok
 }
 
-func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price float64) error {
+// PlaceLimitOrder first trades the order against the opposite side at every
+// price level its limit allows (a buy against asks <= price, a sell against
+// bids >= price), each fill at the resting order's price. Whatever is left
+// then rests in the book at price. The returned matches are empty if the
+// order didn't cross.
+func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price uint64) ([]MatchedOrder, error) {
 	if order.ID != 0 {
 		if _, exists := ordBook.orders[order.ID]; exists {
-			return fmt.Errorf("PlaceLimitOrder -> %w", ErrDuplicateOrderID)
+			return nil, fmt.Errorf("PlaceLimitOrder -> %w", ErrDuplicateOrderID)
 		}
 	}
 
-	var err error = nil
+	ordBook.purgeExpired(!order.IsBid)
+	matches := ordBook.match(order, price)
+	if order.IsFilled() {
+		return matches, nil
+	}
+
 	if order.IsBid {
 		lim, exists := ordBook.BidLimits[price]
 		if !exists {
@@ -71,7 +87,115 @@ func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price float64) error {
 	if order.ID != 0 {
 		ordBook.orders[order.ID] = order
 	}
-	return err
+	return matches, nil
+}
+
+// PlaceMarketOrder fills the whole order immediately, best price first, but
+// never at a price worse than worstPrice (above it for a buy, below it for a
+// sell). If the book can't fill all of it within that bound, nothing is
+// filled and ErrInsufficientLiquidity is returned.
+func (ordBook *OrderBook) PlaceMarketOrder(order *Order, worstPrice uint64) ([]MatchedOrder, error) {
+	ordBook.purgeExpired(!order.IsBid)
+	if order.Size > ordBook.crossableVolume(order.IsBid, worstPrice) {
+		return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
+	}
+	return ordBook.match(order, worstPrice), nil
+}
+
+// crosses reports whether a resting level at levelPrice can trade with an
+// incoming order on side isBid limited to price.
+func crosses(isBid bool, levelPrice, price uint64) bool {
+	if isBid {
+		return levelPrice <= price
+	}
+	return levelPrice >= price
+}
+
+// opposite returns the side an incoming order on side isBid trades against,
+// sorted best price first.
+func (ordBook *OrderBook) opposite(isBid bool) []*Limit {
+	if isBid {
+		return ordBook.Asks()
+	}
+	return ordBook.Bids()
+}
+
+// crossableVolume is the resting volume an incoming order could trade against
+// without going past price.
+func (ordBook *OrderBook) crossableVolume(isBid bool, price uint64) uint64 {
+	var total uint64
+	for _, lim := range ordBook.opposite(isBid) {
+		if !crosses(isBid, lim.Price, price) {
+			break
+		}
+		total += lim.TotalVolume
+	}
+	return total
+}
+
+// match trades order against the opposite side, best price first, until it
+// is filled or the next level is past price. Filled resting orders and
+// emptied levels are removed from the book.
+func (ordBook *OrderBook) match(order *Order, price uint64) []MatchedOrder {
+	matches := []MatchedOrder{}
+	toDelete := []*Limit{}
+
+	for _, lim := range ordBook.opposite(order.IsBid) {
+		if order.IsFilled() || !crosses(order.IsBid, lim.Price, price) {
+			break
+		}
+		lim.FillOrder(order, &matches)
+		if lim.IsEmpty() {
+			toDelete = append(toDelete, lim)
+		}
+	}
+
+	for _, m := range matches {
+		resting := m.Bid
+		if order.IsBid {
+			resting = m.Ask
+		}
+		if resting.IsFilled() {
+			delete(ordBook.orders, resting.ID)
+		}
+	}
+	if len(toDelete) > 0 {
+		for _, lim := range toDelete {
+			ordBook.removeLimit(lim, !order.IsBid)
+		}
+		ordBook.DeleteLimit(nil, !order.IsBid)
+	}
+	return matches
+}
+
+// purgeExpired removes every expired order from one side of the book, so
+// matching never trades against an order its maker no longer stands behind.
+// TODO: this walks the whole side on every incoming order; index orders by
+// expiry if the book gets large.
+func (ordBook *OrderBook) purgeExpired(isBid bool) {
+	side := ordBook.asks
+	if isBid {
+		side = ordBook.bids
+	}
+	now := ordBook.now()
+
+	emptied := []*Limit{}
+	for _, lim := range side {
+		for o := lim.head; o != nil; {
+			next := o.next
+			if o.isExpired(now) {
+				lim.DeleteOrder(o)
+				delete(ordBook.orders, o.ID)
+			}
+			o = next
+		}
+		if lim.IsEmpty() {
+			emptied = append(emptied, lim)
+		}
+	}
+	for _, lim := range emptied {
+		ordBook.removeLimit(lim, isBid)
+	}
 }
 
 func (ordBook *OrderBook) removeLimit(lim *Limit, isBid bool) {
@@ -107,57 +231,6 @@ func (ordBook *OrderBook) DeleteLimit(lim *Limit, isBid bool) {
 	}
 }
 
-func (ordBook *OrderBook) PlaceMarketOrder(order *Order) ([]MatchedOrder, error) {
-	matches := []MatchedOrder{}
-	toDelete := []*Limit{}
-
-	if order.IsBid {
-		if order.Size > ordBook.AskTotalVolume() {
-			return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
-		}
-		for _, askLimit := range ordBook.Asks() {
-			askLimit.FillOrder(order, &matches)
-
-			if askLimit.IsEmpty() {
-				toDelete = append(toDelete, askLimit)
-			}
-			if order.IsFilled() {
-				break
-			}
-		}
-	} else {
-		if order.Size > ordBook.BidTotalVolume() {
-			return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
-		}
-		for _, bidLimit := range ordBook.Bids() {
-			bidLimit.FillOrder(order, &matches)
-
-			if bidLimit.IsEmpty() {
-				toDelete = append(toDelete, bidLimit)
-			}
-			if order.IsFilled() {
-				break
-			}
-		}
-	}
-	for _, m := range matches {
-		resting := m.Bid
-		if order.IsBid {
-			resting = m.Ask
-		}
-		if resting.IsFilled() {
-			delete(ordBook.orders, resting.ID)
-		}
-	}
-	if len(toDelete) > 0 {
-		for _, lim := range toDelete {
-			ordBook.removeLimit(lim, !order.IsBid)
-		}
-		ordBook.DeleteLimit(nil, !order.IsBid)
-	}
-	return matches, nil
-}
-
 func (ordBook *OrderBook) BidTotalVolume() uint64 {
 	var total uint64 = 0
 	for _, lim := range ordBook.bids {
@@ -173,7 +246,6 @@ func (ordBook *OrderBook) AskTotalVolume() uint64 {
 	}
 	return total
 }
-
 
 func (ordBook *OrderBook) CancelOrder(id uint64) (*Order, error) {
 	order, ok := ordBook.orders[id]

@@ -7,11 +7,12 @@ import (
 )
 
 // signedOrderRequest is an EIP-712 signed order (see signing.go). Limit and
-// market orders share it; a market order is signed with price 0.
+// market orders share it; for a market order, price is the worst price accepted.
 type signedOrderRequest struct {
 	Maker     common.Address `json:"maker"`
 	Symbol    string         `json:"symbol"`
 	IsBid     bool           `json:"isBid"`
+	IsMarket  bool           `json:"isMarket"`
 	Size      uint64         `json:"size"`
 	Price     uint64         `json:"price"`
 	Nonce     uint64         `json:"nonce"`
@@ -21,13 +22,14 @@ type signedOrderRequest struct {
 
 func (r signedOrderRequest) message() OrderMessage {
 	return OrderMessage{
-		Maker:  r.Maker,
-		Symbol: Symbol(r.Symbol),
-		IsBid:  r.IsBid,
-		Size:   r.Size,
-		Price:  r.Price,
-		Nonce:  r.Nonce,
-		Expiry: r.Expiry,
+		Maker:    r.Maker,
+		Symbol:   Symbol(r.Symbol),
+		IsBid:    r.IsBid,
+		IsMarket: r.IsMarket,
+		Size:     r.Size,
+		Price:    r.Price,
+		Nonce:    r.Nonce,
+		Expiry:   r.Expiry,
 	}
 }
 
@@ -59,8 +61,9 @@ type orderResponse struct {
 	Maker  string  `json:"maker"`
 	Symbol string  `json:"symbol"`
 	Side   string  `json:"side"`
-	Size   uint64   `json:"size"`
-	Price  float64 `json:"price,omitempty"`
+	Size   uint64  `json:"size"`
+	Filled uint64  `json:"filled"`
+	Price  uint64  `json:"price,omitempty"`
 }
 
 func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
@@ -70,22 +73,25 @@ func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
 		Symbol: string(symbol),
 		Side:   side(order.IsBid),
 		Size:   order.Size,
+		Filled: order.Filled,
 	}
-	// market orders never rest on a limit, so they have no price
+	// only a resting order sits on a limit, so filled and market orders have no price
 	if order.Limit != nil {
 		res.Price = order.Limit.Price
 	}
 	return res
 }
 
-type placeMarketOrderResponse struct {
+// placeOrderResponse is returned for both limit and market orders: the order
+// after matching, plus every fill it made.
+type placeOrderResponse struct {
 	Order   orderResponse          `json:"order"`
 	Matches []matchedOrderResponse `json:"matches"`
 }
 
 type matchedOrderResponse struct {
-	SizeFilled uint64   `json:"sizeFilled"`
-	Price      float64 `json:"price"`
+	SizeFilled uint64 `json:"sizeFilled"`
+	Price      uint64 `json:"price"`
 }
 
 func newMatchedOrderResponse(m matchengine.MatchedOrder) matchedOrderResponse {
@@ -95,8 +101,8 @@ func newMatchedOrderResponse(m matchengine.MatchedOrder) matchedOrderResponse {
 	}
 }
 
-func newMarketOrderResponse(order *matchengine.Order, symbol Symbol, matches *[]matchengine.MatchedOrder) placeMarketOrderResponse {
-	res := placeMarketOrderResponse{
+func newPlaceOrderResponse(order *matchengine.Order, symbol Symbol, matches *[]matchengine.MatchedOrder) placeOrderResponse {
+	res := placeOrderResponse{
 		Order:   newOrderResponse(order, symbol),
 		Matches: make([]matchedOrderResponse, 0, len(*matches)),
 	}
@@ -115,7 +121,7 @@ func newErrorResponse(err error) errorResponse {
 }
 
 type limitResponse struct {
-	Price        float64         `json:"price"`
+	Price        uint64          `json:"price"`
 	TotalVolumne uint64           `json:"totalVolume"`
 	TotalOrders  uint64           `json:"totalOrders"`
 	Orders       []orderResponse `json:"orders"`

@@ -29,6 +29,7 @@ internal/
                  to the WAL and replays it on startup, HTTP handlers,
                  DTOs and routes
   wal/           write-ahead log: append (fsynced) + replay, optional HMAC chain
+  logging/       zerolog setup + one log line per HTTP request
 cmd/
   api/           exchange server: wires everything together, graceful
                  shutdown, Ethereum client (reads the chain ID for signing)
@@ -72,6 +73,8 @@ ganacheServer:
     address: "localhost"
     port: 8545
     privateKey: <PRIVATE_KEY>
+logLevel: "info"
+logPretty: false
 walPath: "./data/wal.log"
 ```
 
@@ -84,6 +87,8 @@ Some fields can be overridden with environment variables:
 | `DB_PATH` | *(required)* | database URL |
 | `GANACHE_HOST` | `localhost` | Ganache node host |
 | `GANACHE_PORT` | `8545` | Ganache node port |
+| `LOG_LEVEL` | `info` | minimum log level: `debug`, `info`, `warn`, `error` |
+| `LOG_PRETTY` | `false` | `true` for readable console logs instead of JSON |
 | `WAL_PATH` | `./data/wal.log` | write-ahead log file (parent dir is created) |
 | `WAL_HMAC_KEY` | *(unset)* | secret that makes the WAL tamper-evident, see [Persistence](#persistence) |
 

@@ -1,6 +1,4 @@
 /api
 /client
 /logging
-/wal
 /exchange/actions.go
-/exchange/recover.go

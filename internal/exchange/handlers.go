@@ -30,22 +30,29 @@ func (h *Handler) mapError(c *echo.Context, err error) error {
 		return c.JSON(http.StatusNotFound, newErrorResponse(err))
 	case errors.Is(err, ErrInsufficientLiquidity):
 		return c.JSON(http.StatusConflict, newErrorResponse(err))
-	case errors.Is(err, ErrInvalidSize), errors.Is(err, ErrInvalidPrice):
+	case errors.Is(err, ErrInvalidSize), errors.Is(err, ErrInvalidPrice),
+		errors.Is(err, ErrMarketOrderHasPrice), errors.Is(err, ErrOrderExpired):
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
+	case errors.Is(err, ErrInvalidSignature):
+		return c.JSON(http.StatusUnauthorized, newErrorResponse(err))
+	case errors.Is(err, ErrNotOrderOwner):
+		return c.JSON(http.StatusForbidden, newErrorResponse(err))
+	case errors.Is(err, ErrNonceUsed):
+		return c.JSON(http.StatusConflict, newErrorResponse(err))
 	default:
 		return c.JSON(http.StatusInternalServerError, "internal error")
 	}
 }
 
 func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
-	var req placeLimitOrderRequest
+	var req signedOrderRequest
 
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
 
-	order, err := h.ex.placeLimitOrder(req.IsBid, req.Price, req.Size, symbol)
+	order, err := h.ex.placeLimitOrder(req.message(), req.Signature)
 	if err != nil {
 		return h.mapError(c,err)
 	}
@@ -53,14 +60,14 @@ func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 }
 
 func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
-	var req placeMarketOrderRequest
+	var req signedOrderRequest
 
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
 	symbol := Symbol(req.Symbol)
 
-	matches,order, err := h.ex.placeMarketOrder(req.IsBid, req.Size, symbol)
+	matches,order, err := h.ex.placeMarketOrder(req.message(), req.Signature)
 	if err != nil {
 		return h.mapError(c,err)
 	}
@@ -75,7 +82,7 @@ func (h *Handler) CancelOrder(c *echo.Context) error {
 	}
 	symbol := Symbol(req.Symbol)
 
-	order, err := h.ex.cancelOrder(symbol, req.OrderID)
+	order, err := h.ex.cancelOrder(req.message(), req.Signature)
 	if err != nil {
 		return h.mapError(c,err)
 	}

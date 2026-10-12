@@ -3,12 +3,14 @@ package matchengine
 import (
 	"fmt"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Order represents a single buy or sell order resting at a price level.
 type Order struct {
 	ID        uint64
-	UserId    uint64
+	Maker     common.Address
 	Size      uint64
 	IsBid     bool
 	Limit     *Limit
@@ -18,10 +20,10 @@ type Order struct {
 	next *Order
 }
 
-func NewOrder(id uint64, isbid bool, size uint64, userId uint64) *Order {
+func NewOrder(id uint64, isbid bool, size uint64, maker common.Address) *Order {
 	return &Order{
 		ID:        id,
-		UserId:    userId,
+		Maker:     maker,
 		Size:      size,
 		IsBid:     isbid,
 		Limit:     nil,

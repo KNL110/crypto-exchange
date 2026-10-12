@@ -1,26 +1,49 @@
 package exchange
 
-import matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+import (
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+)
 
-type placeLimitOrderRequest struct {
-	Symbol string  `json:"symbol"`
-	IsBid  bool    `json:"isBid"`
-	Size   uint64   `json:"size"`
-	Price  float64 `json:"price"`
-	UserId uint64  `json:"userId"`
+// signedOrderRequest is an EIP-712 signed order (see signing.go). Limit and
+// market orders share it; a market order is signed with price 0.
+type signedOrderRequest struct {
+	Maker     common.Address `json:"maker"`
+	Symbol    string         `json:"symbol"`
+	IsBid     bool           `json:"isBid"`
+	Size      uint64         `json:"size"`
+	Price     uint64         `json:"price"`
+	Nonce     uint64         `json:"nonce"`
+	Expiry    uint64         `json:"expiry"`
+	Signature hexutil.Bytes  `json:"signature"`
 }
 
-type placeMarketOrderRequest struct {
-	Symbol string `json:"symbol"`
-	IsBid  bool   `json:"isBid"`
-	Size   uint64  `json:"size"`
-	UserId uint64 `json:"userId"`
+func (r signedOrderRequest) message() OrderMessage {
+	return OrderMessage{
+		Maker:  r.Maker,
+		Symbol: Symbol(r.Symbol),
+		IsBid:  r.IsBid,
+		Size:   r.Size,
+		Price:  r.Price,
+		Nonce:  r.Nonce,
+		Expiry: r.Expiry,
+	}
 }
 
 type cancelOrderRequest struct {
-	Symbol  string `json:"symbol"`
-	OrderID uint64 `json:"orderId"`
-	UserId uint64 `json:"userId"`
+	Maker     common.Address `json:"maker"`
+	Symbol    string         `json:"symbol"`
+	OrderID   uint64         `json:"orderId"`
+	Signature hexutil.Bytes  `json:"signature"`
+}
+
+func (r cancelOrderRequest) message() CancelMessage {
+	return CancelMessage{
+		Maker:   r.Maker,
+		Symbol:  Symbol(r.Symbol),
+		OrderID: r.OrderID,
+	}
 }
 
 type orderBookRequest struct {
@@ -33,6 +56,7 @@ type ManyOrderBookRequest struct {
 
 type orderResponse struct {
 	Id     uint64  `json:"id"`
+	Maker  string  `json:"maker"`
 	Symbol string  `json:"symbol"`
 	Side   string  `json:"side"`
 	Size   uint64   `json:"size"`
@@ -42,6 +66,7 @@ type orderResponse struct {
 func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
 	res := orderResponse{
 		Id:     order.ID,
+		Maker:  order.Maker.Hex(),
 		Symbol: string(symbol),
 		Side:   side(order.IsBid),
 		Size:   order.Size,

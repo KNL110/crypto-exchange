@@ -4,36 +4,50 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"math/big"
+	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
-	users "github.com/knl110/crypto-exchange/internal/users"
 )
 
 // Exchange coordinates trading across all configured symbols.
+//
+// Users are wallet addresses: every order and cancel must be signed by the
+// maker (see signing.go). privateKey is the exchange's own operator key, used
+// to submit settlement transactions — never a user's key.
 type Exchange struct {
-	users map[uint64]*users.User
 	privateKey  *ecdsa.PrivateKey
+	chainID     *big.Int
 	orderBooks  map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
+
+	// usedNonces stops a signed order from being submitted twice.
+	// TODO: persist this; it is lost on restart.
+	noncesMu   sync.Mutex
+	usedNonces map[common.Address]map[uint64]struct{}
 }
 
 // NewExchange creates an Exchange with an empty order book for each symbol.
-func NewExchange(privateKey string) (*Exchange, error) {
+// chainID is part of the EIP-712 domain, so signatures from other chains are rejected.
+func NewExchange(privateKey string, chainID *big.Int) (*Exchange, error) {
 	books := make(map[Symbol]*SymbolBook)
 	for _, sym := range symbols {
 		books[sym] = newSymbolBook(sym)
 	}
 	prvKey, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
-		return nil,fmt.Errorf("failed to parse private key(Exchange): %w", err)
+		return nil, fmt.Errorf("failed to parse private key(Exchange): %w", err)
 	}
 	return &Exchange{
 		orderBooks: books,
 		privateKey: prvKey,
-		users: make(map[uint64]*users.User),
-	},nil
+		chainID:    chainID,
+		usedNonces: make(map[common.Address]map[uint64]struct{}),
+	}, nil
 }
 
 func (e *Exchange) symbolBook(symbol Symbol) (*SymbolBook, error) {
@@ -53,49 +67,98 @@ func (e *Exchange) Symbols() []Symbol {
 	return symbols
 }
 
+// authorizeOrder checks the maker signed msg, that it has not expired, and
+// reserves its nonce. Call releaseNonce if the order is then not accepted.
+func (e *Exchange) authorizeOrder(msg OrderMessage, sig []byte) error {
+	signer, err := recoverSigner(msg.typedData(e.chainID), sig)
+	if err != nil {
+		return err
+	}
+	if signer != msg.Maker {
+		return ErrInvalidSignature
+	}
+	if msg.Expiry <= uint64(time.Now().Unix()) {
+		return ErrOrderExpired
+	}
+
+	e.noncesMu.Lock()
+	defer e.noncesMu.Unlock()
+	used, ok := e.usedNonces[msg.Maker]
+	if !ok {
+		used = make(map[uint64]struct{})
+		e.usedNonces[msg.Maker] = used
+	}
+	if _, dup := used[msg.Nonce]; dup {
+		return ErrNonceUsed
+	}
+	used[msg.Nonce] = struct{}{}
+	return nil
+}
+
+func (e *Exchange) releaseNonce(maker common.Address, nonce uint64) {
+	e.noncesMu.Lock()
+	defer e.noncesMu.Unlock()
+	delete(e.usedNonces[maker], nonce)
+}
+
 // TODO:consider the performance impact of copying the order struct in all these services
-func (e *Exchange) placeLimitOrder(isBid bool, price float64, size uint64, sym Symbol) (*matchengine.Order, error) {
-	if size <= 0 {
+// TODO:consider the performance impact of copying the order struct in all these services
+func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) (*matchengine.Order, error) {
+	if msg.Size == 0 {
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidSize)
 	}
-	if price <= 0 {
+	if msg.Price == 0 {
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidPrice)
 	}
 
-	sb, err := e.symbolBook(sym)
+	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
+	if err := e.authorizeOrder(msg, sig); err != nil {
+		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+	}
+
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
 	id := e.nextOrderID.Add(1)
-	order := matchengine.NewOrder(id, isBid, size)
+	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 
-	if err = sb.book.PlaceLimitOrder(order, price); err != nil {
+	if err = sb.book.PlaceLimitOrder(order, float64(msg.Price)); err != nil {
+		e.releaseNonce(msg.Maker, msg.Nonce)
 		return nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
 	snap := *order
 	return &snap, nil
 }
 
-func (e *Exchange) placeMarketOrder(isBid bool, size uint64, sym Symbol) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
-	if size <= 0 {
+func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
+	if msg.Size == 0 {
 		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidSize)
 	}
+	// A signed limit order must not be replayable as a market order.
+	if msg.Price != 0 {
+		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrMarketOrderHasPrice)
+	}
 
-	sb, err := e.symbolBook(sym)
+	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
 		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
 	}
+	if err := e.authorizeOrder(msg, sig); err != nil {
+		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
+	}
+
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
 	id := e.nextOrderID.Add(1)
-	order := matchengine.NewOrder(id, isBid, size)
+	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 
 	matched, err := sb.book.PlaceMarketOrder(order)
 	if err != nil {
+		e.releaseNonce(msg.Maker, msg.Nonce)
 		if errors.Is(err, matchengine.ErrInsufficientLiquidity) {
 			err = ErrInsufficientLiquidity
 		}
@@ -105,15 +168,31 @@ func (e *Exchange) placeMarketOrder(isBid bool, size uint64, sym Symbol) ([]matc
 	return matched, &snap, nil
 }
 
-func (e *Exchange) cancelOrder(sym Symbol, orderID uint64) (*matchengine.Order, error) {
-	sb, err := e.symbolBook(sym)
+func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Order, error) {
+	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
+	signer, err := recoverSigner(msg.typedData(e.chainID), sig)
+	if err != nil {
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
+	}
+	if signer != msg.Maker {
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrInvalidSignature)
+	}
+
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
-	order, err := sb.book.CancelOrder(orderID)
+	resting, ok := sb.book.GetOrder(msg.OrderID)
+	if !ok {
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrOrderNotFound)
+	}
+	if resting.Maker != msg.Maker {
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrNotOrderOwner)
+	}
+
+	order, err := sb.book.CancelOrder(msg.OrderID)
 	if err != nil {
 		if errors.Is(err, matchengine.ErrOrderNotFound) {
 			err = ErrOrderNotFound

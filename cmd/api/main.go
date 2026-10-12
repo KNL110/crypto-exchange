@@ -15,7 +15,14 @@ import (
 func main() {
 	cfg := config.MustLoad()
 
-	ex,err := exchange.NewExchange(cfg.GanacheServer.PrivateKey)
+	ethClient := EthClient(cfg.GanacheServer.GetAddr())
+	defer ethClient.Close()
+	chainID, err := ethClient.ChainID(context.Background())
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to get chain id")
+	}
+
+	ex, err := exchange.NewExchange(cfg.GanacheServer.PrivateKey, chainID)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create exchange")
 	}
@@ -29,8 +36,6 @@ func main() {
 	// }()
 
 	app := newApplication(cfg, exchange.NewHandler(ex))
-	ethClient := EthClient(cfg.GanacheServer.GetAddr())
-	transferEth(ethClient, cfg.GanacheServer.PrivateKey)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

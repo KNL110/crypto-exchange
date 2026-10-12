@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"github.com/rs/zerolog/log"
 
 	"github.com/knl110/crypto-exchange/internal/config"
 	"github.com/knl110/crypto-exchange/internal/exchange"
+	"github.com/knl110/crypto-exchange/internal/logging"
 )
 
 type application struct {
@@ -47,6 +49,8 @@ func (strictJSONSerializer) Deserialize(c *echo.Context, target any) error {
 func (app *application) mount() *echo.Echo {
 	e := echo.New()
 	e.JSONSerializer = strictJSONSerializer{}
+	// RequestID tags each request (X-Request-ID) so its log line can be traced.
+	e.Use(middleware.RequestID(), logging.RequestLoggerMiddleware(log.Logger))
 
 	api := e.Group("/api/v1")
 	api.GET("/healthz", app.exchange.Health)

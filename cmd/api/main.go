@@ -10,10 +10,12 @@ import (
 
 	"github.com/knl110/crypto-exchange/internal/config"
 	"github.com/knl110/crypto-exchange/internal/exchange"
+	"github.com/knl110/crypto-exchange/internal/logging"
 )
 
 func main() {
 	cfg := config.MustLoad()
+	log.Logger = logging.New(cfg.LogLevel, cfg.LogPretty)
 
 	ethClient := EthClient(cfg.GanacheServer.GetAddr())
 	defer ethClient.Close()

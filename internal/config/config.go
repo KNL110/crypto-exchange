@@ -27,8 +27,8 @@ type Config struct {
 	HttpServer    `yaml:"httpServer"`
 	GanacheServer `yaml:"ganacheServer"`
 
-	LogLevel        string
-	LogPretty       bool
+	LogLevel        string `yaml:"logLevel" env:"LOG_LEVEL" env-default:"info"`    // debug, info, warn, error
+	LogPretty       bool   `yaml:"logPretty" env:"LOG_PRETTY" env-default:"false"` // human-readable console logs instead of JSON
 	WALPath         string `yaml:"walPath" env:"WAL_PATH" env-default:"./data/wal.log"`
 	WALHMACKey      string `yaml:"walHmacKey" env:"WAL_HMAC_KEY"` // empty disables tamper detection; keep it out of the yaml in production
 	Symbols         []string

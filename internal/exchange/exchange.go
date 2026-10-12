@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+	"github.com/knl110/crypto-exchange/internal/wal"
 )
 
 // Exchange coordinates trading across all configured symbols.
@@ -25,12 +27,17 @@ type Exchange struct {
 	orderBooks  map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
 
-	// now is the one clock for the exchange and all its books: it decides
-	// both whether a new order has expired and when resting orders expire.
+	// now is the exchange's clock. Each operation reads it once and applies
+	// entirely at that time (see SymbolBook.now), so it can be replayed exactly.
 	now func() time.Time
 
-	// usedNonces stops a signed order from being submitted twice.
-	// TODO: persist this; it is lost on restart.
+	// wal durably logs every accepted order and cancel before it is applied,
+	// so Recover can rebuild the books after a restart. nil means nothing is
+	// persisted (no Recover called).
+	wal *wal.WAL
+
+	// usedNonces stops a signed order from being submitted twice. Recover
+	// rebuilds it from the WAL.
 	noncesMu   sync.Mutex
 	usedNonces map[common.Address]map[uint64]struct{}
 }
@@ -51,8 +58,7 @@ func NewExchange(privateKey string, chainID *big.Int) (*Exchange, error) {
 	}
 	for _, sym := range symbols {
 		sb := newSymbolBook(sym)
-		// Read e.now on every call, so replacing it later affects the books too.
-		sb.book.SetClock(func() uint64 { return uint64(e.now().Unix()) })
+		sb.book.SetClock(func() uint64 { return sb.now })
 		e.orderBooks[sym] = sb
 	}
 	return e, nil
@@ -75,9 +81,35 @@ func (e *Exchange) Symbols() []Symbol {
 	return symbols
 }
 
-// authorizeOrder checks the maker signed msg, that it has not expired, and
-// reserves its nonce. Call releaseNonce if the order is then not accepted.
-func (e *Exchange) authorizeOrder(msg OrderMessage, sig []byte) error {
+// replayed carries what Recover takes from a WAL record instead of
+// generating it live: the original time and order ID. nil means live.
+type replayed struct {
+	ts      int64
+	orderID uint64
+}
+
+// opTime is the unix time (seconds) an operation runs at.
+func (e *Exchange) opTime(rp *replayed) int64 {
+	if rp != nil {
+		return rp.ts
+	}
+	return e.now().Unix()
+}
+
+// logAction appends rec to the WAL. Replayed actions are already in it.
+func (e *Exchange) logAction(rp *replayed, rec wal.Record) error {
+	if rp != nil || e.wal == nil {
+		return nil
+	}
+	if _, err := e.wal.Append(rec); err != nil {
+		return fmt.Errorf("append wal: %w", err)
+	}
+	return nil
+}
+
+// authorizeOrder checks the maker signed msg, that it has not expired at ts,
+// and reserves its nonce. Call releaseNonce if the order is then not accepted.
+func (e *Exchange) authorizeOrder(msg OrderMessage, sig []byte, ts int64) error {
 	signer, err := recoverSigner(msg.typedData(e.chainID), sig)
 	if err != nil {
 		return err
@@ -85,7 +117,7 @@ func (e *Exchange) authorizeOrder(msg OrderMessage, sig []byte) error {
 	if signer != msg.Maker {
 		return ErrInvalidSignature
 	}
-	if msg.Expiry <= uint64(e.now().Unix()) {
+	if msg.Expiry <= uint64(ts) {
 		return ErrOrderExpired
 	}
 
@@ -109,86 +141,111 @@ func (e *Exchange) releaseNonce(maker common.Address, nonce uint64) {
 	delete(e.usedNonces[maker], nonce)
 }
 
-// TODO:consider the performance impact of copying the order struct in all these services
 // placeLimitOrder trades the order against the book as far as its limit price
 // allows, then rests whatever is left. It returns the fills (possibly none),
 // a snapshot of the order, and the maker's own resting orders that self-trade
 // prevention cancelled.
 func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
-	if msg.IsMarket {
-		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrOrderTypeMismatch)
+	return e.placeOrder(msg, sig, false, nil)
+}
+
+// placeMarketOrder fills the whole order now, never past its signed worst
+// price, or fails with ErrInsufficientLiquidity and changes nothing.
+func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+	return e.placeOrder(msg, sig, true, nil)
+}
+
+// placeOrder is shared by live orders (rp == nil) and WAL replay, so a
+// replayed order goes through exactly the same checks and matching.
+//
+// TODO:consider the performance impact of copying the order struct in all these services
+func (e *Exchange) placeOrder(msg OrderMessage, sig []byte, market bool, rp *replayed) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+	op, action := "PlaceLimitOrder (Exchange)", wal.ActionPlaceLimit
+	if market {
+		op, action = "PlaceMarketOrder (Exchange)", wal.ActionPlaceMarket
+	}
+	fail := func(err error) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+		return nil, nil, nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	if msg.IsMarket != market {
+		return fail(ErrOrderTypeMismatch)
 	}
 	if msg.Size == 0 {
-		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidSize)
+		return fail(ErrInvalidSize)
 	}
+	// For a market order, Price is the worst price the maker accepts;
+	// without one it could fill at any price.
 	if msg.Price == 0 {
-		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidPrice)
+		return fail(ErrInvalidPrice)
 	}
 
 	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+		return fail(err)
 	}
-	if err := e.authorizeOrder(msg, sig); err != nil {
-		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+	ts := e.opTime(rp)
+	if err := e.authorizeOrder(msg, sig, ts); err != nil {
+		return fail(err)
 	}
 
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
+	sb.now = uint64(ts)
 
-	id := e.nextOrderID.Add(1)
+	var id uint64
+	if rp != nil {
+		id = rp.orderID
+	} else {
+		id = e.nextOrderID.Add(1)
+	}
+
+	// Logged before it touches the book: if the engine then rejects it, replay
+	// rejects it the same way, so the rebuilt book still matches.
+	if err := e.logAction(rp, wal.Record{
+		Timestamp: ts,
+		Symbol:    string(msg.Symbol),
+		Action:    action,
+		OrderID:   id,
+		Maker:     msg.Maker.Hex(),
+		IsBid:     msg.IsBid,
+		Size:      msg.Size,
+		Price:     msg.Price,
+		Nonce:     msg.Nonce,
+		Expiry:    msg.Expiry,
+		Signature: hexutil.Encode(sig),
+	}); err != nil {
+		e.releaseNonce(msg.Maker, msg.Nonce)
+		return fail(err)
+	}
+
 	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 	order.Expiry = msg.Expiry
 
-	matched, cancelled, err := sb.book.PlaceLimitOrder(order, msg.Price)
-	if err != nil {
-		e.releaseNonce(msg.Maker, msg.Nonce)
-		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+	var matched []matchengine.MatchedOrder
+	var cancelled []*matchengine.Order
+	if market {
+		matched, cancelled, err = sb.book.PlaceMarketOrder(order, msg.Price)
+	} else {
+		matched, cancelled, err = sb.book.PlaceLimitOrder(order, msg.Price)
 	}
-	snap := *order
-	return matched, &snap, cancelled, nil
-}
-
-func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
-	if !msg.IsMarket {
-		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrOrderTypeMismatch)
-	}
-	if msg.Size == 0 {
-		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidSize)
-	}
-	// Price is the worst price the maker accepts; without one a market
-	// order could fill at any price.
-	if msg.Price == 0 {
-		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidPrice)
-	}
-
-	sb, err := e.symbolBook(msg.Symbol)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
-	}
-	if err := e.authorizeOrder(msg, sig); err != nil {
-		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
-	}
-
-	sb.mu.Lock()
-	defer sb.mu.Unlock()
-
-	id := e.nextOrderID.Add(1)
-	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
-
-	matched, cancelled, err := sb.book.PlaceMarketOrder(order, msg.Price)
 	if err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
 		if errors.Is(err, matchengine.ErrInsufficientLiquidity) {
 			err = ErrInsufficientLiquidity
 		}
-		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
+		return fail(err)
 	}
 	snap := *order
 	return matched, &snap, cancelled, nil
 }
 
 func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Order, error) {
+	return e.cancel(msg, sig, nil)
+}
+
+// cancel is shared by live cancels (rp == nil) and WAL replay.
+func (e *Exchange) cancel(msg CancelMessage, sig []byte, rp *replayed) (*matchengine.Order, error) {
 	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
@@ -201,8 +258,10 @@ func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Orde
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrInvalidSignature)
 	}
 
+	ts := e.opTime(rp)
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
+	sb.now = uint64(ts)
 
 	resting, ok := sb.book.GetOrder(msg.OrderID)
 	if !ok {
@@ -210,6 +269,17 @@ func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Orde
 	}
 	if resting.Maker != msg.Maker {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrNotOrderOwner)
+	}
+
+	if err := e.logAction(rp, wal.Record{
+		Timestamp: ts,
+		Symbol:    string(msg.Symbol),
+		Action:    wal.ActionCancel,
+		OrderID:   msg.OrderID,
+		Maker:     msg.Maker.Hex(),
+		Signature: hexutil.Encode(sig),
+	}); err != nil {
+		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
 
 	order, err := sb.book.CancelOrder(msg.OrderID)
@@ -232,6 +302,7 @@ func (e *Exchange) getOrderBook(sym Symbol) (orderBookResponse, error) {
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
+	sb.now = uint64(e.now().Unix())
 	sb.book.PurgeExpired()
 	return newOrderBookResponse(sb.book, sym), nil
 }

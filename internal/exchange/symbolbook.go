@@ -23,6 +23,11 @@ type SymbolBook struct {
 	mu     sync.Mutex
 	symbol Symbol
 	book   *matchengine.OrderBook
+
+	// now is the unix time (seconds) of the operation currently holding mu.
+	// The book's clock reads it, so an operation decides expiry at one fixed
+	// time, which replay can reproduce exactly.
+	now uint64
 }
 
 func newSymbolBook(symbol Symbol) *SymbolBook {

@@ -66,36 +66,53 @@ Shut it down with `Ctrl+C` (`SIGINT`) or `SIGTERM` for a graceful drain. `kill -
 
 ### Configuration
 
-Configuration is loaded from a YAML file (see `internal/config/config.go`), given via the `CONFIG_PATH` env var or the `-config` flag. Copy [`config/config.example.yaml`](config/config.example.yaml) to `config/config.yaml` and fill it in:
+Settings come from two places:
+
+- **`config/config.yaml`** holds non-secret settings. Copy [`config/config.example.yaml`](config/config.example.yaml) to it. The file is chosen with `CONFIG_PATH` or the `-config` flag.
+- **Environment variables** hold the secrets, which are never read from the YAML. For local development, copy [`.env.example`](.env.example) to `.env` (gitignored) and fill it in. `.env` in the working directory is loaded automatically on startup. Variables already set in the real environment win over `.env`, and environment variables win over `config.yaml`. In production, set the secrets from your secrets manager instead of a file.
 
 ```yaml
+# config/config.yaml
 env: "dev"            # "dev" or "prod"
-dbPath: <DATABASE_URL>
 httpServer:
     address: "0.0.0.0"
     port: 8080
 ganacheServer:
     address: "localhost"
     port: 8545
-    privateKey: <PRIVATE_KEY>
 logLevel: "info"
 logPretty: false
 walPath: "./data/wal.log"
 ```
 
-Some fields can be overridden with environment variables:
+```sh
+# .env
+CONFIG_PATH=./config/config.yaml
+DB_PATH=postgresql://<username>:<password>@localhost:5432/<DatabaseName>
+OPERATOR_PRIVATE_KEY=<PRIVATE_KEY>
+WAL_HMAC_KEY=
+```
+
+Secrets (environment only):
 
 | Var | Default | Description |
 |---|---|---|
-| `HOST` | `0.0.0.0` | HTTP listen address |
-| `PORT` | `8080` | HTTP listen port |
-| `DB_PATH` | *(required)* | database URL |
-| `GANACHE_HOST` | `localhost` | Ganache node host |
-| `GANACHE_PORT` | `8545` | Ganache node port |
-| `LOG_LEVEL` | `info` | minimum log level: `debug`, `info`, `warn`, `error` |
-| `LOG_PRETTY` | `false` | `true` for readable console logs instead of JSON |
-| `WAL_PATH` | `./data/wal.log` | write-ahead log file (parent dir is created) |
-| `WAL_HMAC_KEY` | *(unset)* | secret that makes the WAL tamper-evident, see [Persistence](#persistence) |
+| `DB_PATH` | *(required)* | database URL, including its password |
+| `OPERATOR_PRIVATE_KEY` | *(required)* | the exchange's own operator key (hex, no `0x`), never a user's key |
+| `WAL_HMAC_KEY` | *(unset)* | makes the WAL tamper-evident, see [Persistence](#persistence) |
+
+Non-secret settings (in `config.yaml`, each can be overridden by its variable):
+
+| Var | YAML key | Default | Description |
+|---|---|---|---|
+| `CONFIG_PATH` | — | — | which YAML file to load (or `-config`) |
+| `HOST` | `httpServer.address` | `0.0.0.0` | HTTP listen address |
+| `PORT` | `httpServer.port` | `8080` | HTTP listen port |
+| `GANACHE_HOST` | `ganacheServer.address` | `localhost` | Ethereum node host |
+| `GANACHE_PORT` | `ganacheServer.port` | `8545` | Ethereum node port |
+| `LOG_LEVEL` | `logLevel` | `info` | minimum log level: `debug`, `info`, `warn`, `error` |
+| `LOG_PRETTY` | `logPretty` | `false` | `true` for readable console logs instead of JSON |
+| `WAL_PATH` | `walPath` | `./data/wal.log` | write-ahead log file (parent dir is created) |
 
 ## API
 

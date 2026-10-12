@@ -1,13 +1,17 @@
-env: "dev"
-dbPath: <DATABASE_URL> # for local: "postgresql://<username>:<password>@localhost:5432/<DatabaseName>"
+# Copy to config/config.yaml
+# Every value marked (env: X) can be overridden by that environment variable.
+
+env: "dev"                      # "dev" or "prod" (prod always listens on 0.0.0.0)
+
 httpServer:
-    address: "0.0.0.0"
-    port: 8080
-ganacheServer:
-    address: "localhost"
-    port: 8545
-    privateKey: <PRIVATE_KEY>
-logLevel: "info"  # debug, info, warn, error
-logPretty: false  # true for readable console logs while developing
-walPath: "./data/wal.log" # write-ahead log; replayed on startup to rebuild the order books
-# walHmacKey: set WAL_HMAC_KEY in the environment instead (openssl rand -hex 32)
+    address: "0.0.0.0"          # (env: HOST)
+    port: 8080                  # (env: PORT)
+
+ganacheServer:                  # Ethereum node; the chain ID used for order signatures is read from it
+    address: "localhost"        # (env: GANACHE_HOST)
+    port: 8545                  # (env: GANACHE_PORT)
+
+logLevel: "info"                # (env: LOG_LEVEL) debug, info, warn, error
+logPretty: false                # (env: LOG_PRETTY) true for readable console logs while developing
+
+walPath: "./data/wal.log"       # (env: WAL_PATH) write-ahead log, replayed on startup to rebuild the order books

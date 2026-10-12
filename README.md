@@ -1,16 +1,18 @@
 # CryptoExchange
 
-A small crypto exchange written in Go: an in-memory limit order book matching engine, wrapped in an HTTP API with graceful shutdown, plus an Ethereum client connected to a local Ganache node.
+A small crypto exchange written in Go: an in-memory limit order book matching engine, wrapped in an HTTP API with graceful shutdown. Users are wallet addresses: every order and cancel is an EIP-712 message signed by the user's wallet, and the server never holds user keys.
 
 ## Matching engine
 
 The core matching logic lives in `internal/MatchEngine` (package `matchengine`) and knows nothing about HTTP or symbols — it's just an order book for one trading pair.
 
-- **`Order`** — a single buy (`bid`) or sell (`ask`) order: size, side, timestamp, an ID once placed through the exchange layer.
+- **`Order`** — a single buy (`bid`) or sell (`ask`) order: maker address, remaining size, filled amount, side, expiry, timestamp, and an ID once placed through the exchange layer.
 - **`Limit`** — one price level, holding a FIFO linked list of resting orders. Matching walks this list in insertion order, so fills at a price level are always oldest-order-first.
 - **`OrderBook`** — both sides of the market for one symbol:
-  - `PlaceLimitOrder(order, price)` rests an order at a price level (creating the level if needed). It does not currently cross the book — a limit order always rests, even if it would be immediately marketable.
-  - `PlaceMarketOrder(order)` walks the best price levels on the opposite side, filling the incoming order until it's either fully filled or liquidity runs out, and returns every individual fill as a `MatchedOrder`.
+  - `PlaceLimitOrder(order, price)` first trades the order against the opposite side at every price level its limit allows (a buy against asks ≤ price, a sell against bids ≥ price), each fill at the resting order's price. Whatever is left rests at `price`. Returns the fills.
+  - `PlaceMarketOrder(order, worstPrice)` fills the whole order immediately, best price first, never past `worstPrice`. If the book can't fill all of it within that bound, nothing is filled and it returns `ErrInsufficientLiquidity`.
+  - Prices are whole numbers of ticks (`uint64`), never floats.
+  - Expired resting orders are removed before matching, so they never trade.
   - `CancelOrder(id)` / `GetOrder(id)` remove/look up a resting order by ID.
 
 Matching is deterministic: given the same sequence of place/cancel actions against an empty book, you always end up in the same state.
@@ -22,11 +24,11 @@ internal/
   MatchEngine/   core order book + matching (above)
   config/        YAML config loading
   exchange/      owns one order book per symbol (ETH, BTC, LTC), assigns
-                 order IDs, HTTP handlers, DTOs and routes
-  users/         user model
+                 order IDs, verifies EIP-712 signatures, HTTP handlers,
+                 DTOs and routes
 cmd/
   api/           exchange server: wires everything together, graceful
-                 shutdown, Ethereum client (Ganache)
+                 shutdown, Ethereum client (reads the chain ID for signing)
 ```
 
 ## Requirements
@@ -81,34 +83,67 @@ Some fields can be overridden with environment variables:
 
 ## API
 
-All request bodies must be sent as JSON with `Content-Type: application/json`.
+GET endpoints take query parameters. All request bodies must be sent as JSON with `Content-Type: application/json`.
 
 | Method | Path | Body | Purpose |
 |---|---|---|---|
 | `GET` | `/api/v1/healthz` | — | health check, lists configured symbols |
-| `GET` | `/api/v1/exchange/orderbook` | `{"symbol"}` | order book snapshot for one symbol |
-| `GET` | `/api/v1/exchange/orderbooks` | `{"symbols":[...]}` | order book snapshots for several symbols |
-| `POST` | `/api/v1/exchange/orders/limit` | `{"symbol","isBid","size","price"}` | place a limit order |
-| `POST` | `/api/v1/exchange/orders/market` | `{"symbol","isBid","size"}` | place a market order (matches immediately) |
-| `DELETE` | `/api/v1/exchange/orders/cancel` | `{"symbol","orderId"}` | cancel a resting order |
+| `GET` | `/api/v1/exchange/orderbook?symbol=ETH` | — | order book snapshot for one symbol |
+| `GET` | `/api/v1/exchange/orderbooks?symbols=ETH&symbols=BTC` | — | order book snapshots for several symbols |
+| `POST` | `/api/v1/exchange/orders/limit` | signed order, `isMarket: false` | place a limit order (trades what crosses, rests the rest) |
+| `POST` | `/api/v1/exchange/orders/market` | signed order, `isMarket: true` | place a market order (fills now, within the worst price) |
+| `DELETE` | `/api/v1/exchange/orders/cancel` | signed cancel | cancel one of your resting orders |
 
 Request/response shapes are in `internal/exchange/dto.go`.
 
-Quick example:
+### Signed orders
 
-```sh
-curl -X POST localhost:8080/api/v1/exchange/orders/limit \
-  -H 'Content-Type: application/json' \
-  -d '{"symbol":"BTC","isBid":false,"size":10,"price":65000}'
+There are no accounts. A user is their wallet address, and every order and cancel must be signed by that wallet with [EIP-712](https://eips.ethereum.org/EIPS/eip-712) (`eth_signTypedData_v4`). The server recovers the signer and rejects the request unless it matches `maker`. Types are defined in `internal/exchange/signing.go`:
 
-curl -X GET localhost:8080/api/v1/exchange/orderbook \
-  -H 'Content-Type: application/json' \
-  -d '{"symbol":"BTC"}'
-
-curl -X POST localhost:8080/api/v1/exchange/orders/market \
-  -H 'Content-Type: application/json' \
-  -d '{"symbol":"BTC","isBid":true,"size":5}'
+```text
+EIP712Domain { name: "CryptoExchange", version: "1", chainId }   // chainId read from the node
+Order  { address maker, string symbol, bool isBid, bool isMarket, uint256 size, uint256 price, uint256 nonce, uint256 expiry }
+Cancel { address maker, string symbol, uint256 orderId }
 ```
+
+- `price` is a whole number of ticks. For a limit order it's the limit price; for a market order it's the worst price you accept (slippage protection), and it must be > 0.
+- `isMarket` is part of what's signed, so a signed limit order can't be submitted as a market order or the other way round.
+- `nonce` must be unique per maker. Reusing one is rejected, which stops replays.
+- `expiry` is a unix timestamp in seconds. Expired orders are rejected.
+- Only the maker of an order can cancel it.
+
+Order request body:
+
+```json
+{
+  "maker": "0xYourWalletAddress",
+  "symbol": "ETH",
+  "isBid": false,
+  "isMarket": false,
+  "size": 10,
+  "price": 3500,
+  "nonce": 1,
+  "expiry": 1767225600,
+  "signature": "0x…65-byte signature…"
+}
+```
+
+Cancel request body:
+
+```json
+{ "maker": "0xYourWalletAddress", "symbol": "ETH", "orderId": 1, "signature": "0x…" }
+```
+
+| Status | Meaning |
+|---|---|
+| `401` | signature doesn't match `maker` (or is for another chain) |
+| `403` | cancel for an order you don't own |
+| `409` | nonce already used, or not enough liquidity for a market order |
+| `400` | bad size/price, expired order, `isMarket` doesn't match the endpoint |
+
+### Not done yet
+
+Matches are not settled on-chain: there is no settlement contract yet, and the server doesn't check a maker's token balance or allowance before accepting an order. Prices are ticks, but there's no per-market tick size or lot size yet, so a tick has no defined value.
 
 ## License
 

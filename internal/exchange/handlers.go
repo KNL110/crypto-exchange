@@ -40,7 +40,8 @@ func (h *Handler) mapError(c *echo.Context, err error) error {
 	case errors.Is(err, ErrNonceUsed):
 		return c.JSON(http.StatusConflict, newErrorResponse(err))
 	default:
-		return c.JSON(http.StatusInternalServerError, "internal error")
+		// Don't leak internal details; keep the same {"error": ...} shape as every other error.
+		return c.JSON(http.StatusInternalServerError, errorResponse{Error: "internal error"})
 	}
 }
 

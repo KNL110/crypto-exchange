@@ -29,8 +29,8 @@ type Config struct {
 
 	LogLevel        string
 	LogPretty       bool
-	WALPath         string
-	WALHMACKey      string
+	WALPath         string `yaml:"walPath" env:"WAL_PATH" env-default:"./data/wal.log"`
+	WALHMACKey      string `yaml:"walHmacKey" env:"WAL_HMAC_KEY"` // empty disables tamper detection; keep it out of the yaml in production
 	Symbols         []string
 	ShutdownTimeout time.Duration
 }

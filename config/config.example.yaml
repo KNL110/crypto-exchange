@@ -7,3 +7,5 @@ ganacheServer:
     address: "localhost"
     port: 8545
     privateKey: <PRIVATE_KEY>
+walPath: "./data/wal.log" # write-ahead log; replayed on startup to rebuild the order books
+# walHmacKey: set WAL_HMAC_KEY in the environment instead (openssl rand -hex 32)

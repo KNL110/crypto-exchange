@@ -26,14 +26,14 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create exchange")
 	}
-	// if err := ex.Recover(cfg.WALPath, []byte(cfg.WALHMACKey)); err != nil {
-	// 	log.Fatal().Err(err).Msg("failed to recover exchange state from wal")
-	// }
-	// defer func() {
-	// 	if err := ex.Close(); err != nil {
-	// 		log.Error().Err(err).Msg("failed to close wal")
-	// 	}
-	// }()
+	if err := ex.Recover(cfg.WALPath, []byte(cfg.WALHMACKey)); err != nil {
+		log.Fatal().Err(err).Str("wal_path", cfg.WALPath).Msg("failed to recover exchange state from wal")
+	}
+	defer func() {
+		if err := ex.Close(); err != nil {
+			log.Error().Err(err).Msg("failed to close wal")
+		}
+	}()
 
 	app := newApplication(cfg, exchange.NewHandler(ex))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

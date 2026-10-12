@@ -32,6 +32,13 @@ func NewOrderBook() *OrderBook {
 	}
 }
 
+// SetClock replaces the source of the current unix time (seconds) used to
+// decide which orders have expired. Callers use it to share one clock with
+// the book, and tests to control time.
+func (ordBook *OrderBook) SetClock(now func() uint64) {
+	ordBook.now = now
+}
+
 func (ordBook *OrderBook) String() string {
 	return fmt.Sprintf("OrderBook[Asks: %v, Bids: %v]", ordBook.Asks(), ordBook.Bids())
 }

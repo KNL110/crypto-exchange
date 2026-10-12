@@ -131,7 +131,7 @@ func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) ([]matchengine.
 	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 	order.Expiry = msg.Expiry
 
-	matched, err := sb.book.PlaceLimitOrder(order, msg.Price)
+	matched, _, err := sb.book.PlaceLimitOrder(order, msg.Price)
 	if err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
 		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
@@ -167,7 +167,7 @@ func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine
 	id := e.nextOrderID.Add(1)
 	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 
-	matched, err := sb.book.PlaceMarketOrder(order, msg.Price)
+	matched, _, err := sb.book.PlaceMarketOrder(order, msg.Price)
 	if err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
 		if errors.Is(err, matchengine.ErrInsufficientLiquidity) {

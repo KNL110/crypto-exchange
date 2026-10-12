@@ -55,18 +55,19 @@ func (ordBook *OrderBook) GetOrder(id uint64) (*Order, bool) {
 // price level its limit allows (a buy against asks <= price, a sell against
 // bids >= price), each fill at the resting order's price. Whatever is left
 // then rests in the book at price. The returned matches are empty if the
-// order didn't cross.
-func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price uint64) ([]MatchedOrder, error) {
+// order didn't cross. cancelled lists the maker's own resting orders removed
+// by self-trade prevention.
+func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price uint64) (matches []MatchedOrder, cancelled []*Order, err error) {
 	if order.ID != 0 {
 		if _, exists := ordBook.orders[order.ID]; exists {
-			return nil, fmt.Errorf("PlaceLimitOrder -> %w", ErrDuplicateOrderID)
+			return nil, nil, fmt.Errorf("PlaceLimitOrder -> %w", ErrDuplicateOrderID)
 		}
 	}
 
 	ordBook.purgeExpired(!order.IsBid)
-	matches := ordBook.match(order, price)
+	matches, cancelled = ordBook.match(order, price)
 	if order.IsFilled() {
-		return matches, nil
+		return matches, cancelled, nil
 	}
 
 	if order.IsBid {
@@ -89,19 +90,21 @@ func (ordBook *OrderBook) PlaceLimitOrder(order *Order, price uint64) ([]Matched
 	if order.ID != 0 {
 		ordBook.orders[order.ID] = order
 	}
-	return matches, nil
+	return matches, cancelled, nil
 }
 
 // PlaceMarketOrder fills the whole order immediately, best price first, but
 // never at a price worse than worstPrice (above it for a buy, below it for a
 // sell). If the book can't fill all of it within that bound, nothing is
-// filled and ErrInsufficientLiquidity is returned.
-func (ordBook *OrderBook) PlaceMarketOrder(order *Order, worstPrice uint64) ([]MatchedOrder, error) {
+// filled and ErrInsufficientLiquidity is returned. cancelled lists the
+// maker's own resting orders removed by self-trade prevention.
+func (ordBook *OrderBook) PlaceMarketOrder(order *Order, worstPrice uint64) (matches []MatchedOrder, cancelled []*Order, err error) {
 	ordBook.purgeExpired(!order.IsBid)
 	if order.Size > ordBook.crossableVolume(order.IsBid, worstPrice, order.Maker) {
-		return nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
+		return nil, nil, fmt.Errorf("PlaceMarketOrder -> %w", ErrInsufficientLiquidity)
 	}
-	return ordBook.match(order, worstPrice), nil
+	matches, cancelled = ordBook.match(order, worstPrice)
+	return matches, cancelled, nil
 }
 
 // crosses reports whether a resting level at levelPrice can trade with an
@@ -144,8 +147,8 @@ func (ordBook *OrderBook) crossableVolume(isBid bool, price uint64, maker common
 // match trades order against the opposite side, best price first, until it
 // is filled or the next level is past price. Filled resting orders, the
 // maker's own crossing orders (self-trade prevention) and emptied levels are
-// removed from the book.
-func (ordBook *OrderBook) match(order *Order, price uint64) []MatchedOrder {
+// removed from the book. It returns the fills and the cancelled own orders.
+func (ordBook *OrderBook) match(order *Order, price uint64) ([]MatchedOrder, []*Order) {
 	matches := []MatchedOrder{}
 	cancelled := []*Order{}
 	toDelete := []*Limit{}
@@ -179,7 +182,7 @@ func (ordBook *OrderBook) match(order *Order, price uint64) []MatchedOrder {
 		}
 		ordBook.DeleteLimit(nil, !order.IsBid)
 	}
-	return matches
+	return matches, cancelled
 }
 
 // PurgeExpired removes expired orders from both sides of the book. Matching

@@ -12,6 +12,7 @@ import (
 	"github.com/knl110/crypto-exchange/internal/config"
 	"github.com/knl110/crypto-exchange/internal/exchange"
 	"github.com/knl110/crypto-exchange/internal/logging"
+	"github.com/knl110/crypto-exchange/internal/recovery"
 )
 
 func main() {
@@ -29,11 +30,12 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create exchange")
 	}
-	if err := ex.Recover(cfg.WALPath, []byte(cfg.WALHMACKey)); err != nil {
+	walLog, err := recovery.Recover(ex, cfg.WALPath, []byte(cfg.WALHMACKey))
+	if err != nil {
 		log.Fatal().Err(err).Str("wal_path", cfg.WALPath).Msg("failed to recover exchange state from wal")
 	}
 	defer func() {
-		if err := ex.Close(); err != nil {
+		if err := walLog.Close(); err != nil {
 			log.Error().Err(err).Msg("failed to close wal")
 		}
 	}()

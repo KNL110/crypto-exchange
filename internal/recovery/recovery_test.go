@@ -1,7 +1,9 @@
-package exchange
+package recovery
 
 import (
+	"encoding/hex"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,53 +11,99 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
+
+	"github.com/knl110/crypto-exchange/internal/exchange"
 	"github.com/knl110/crypto-exchange/internal/signing/signingtest"
 	"github.com/knl110/crypto-exchange/internal/symbol"
 	"github.com/knl110/crypto-exchange/internal/wal"
 )
 
-// recovered starts a fresh exchange from the WAL at path, as a restart would.
-func recovered(t *testing.T, path string, key []byte) *Exchange {
+const symETH = symbol.Symbol("ETH")
+
+var testChainID = big.NewInt(1337)
+
+func newExchange(t *testing.T, opts ...exchange.Option) *exchange.Exchange {
 	t.Helper()
-	ex := newTestExchange(t)
-	if err := ex.Recover(path, key); err != nil {
-		t.Fatalf("Recover: %v", err)
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
 	}
-	t.Cleanup(func() { ex.Close() })
+	ex, err := exchange.NewExchange(hex.EncodeToString(crypto.FromECDSA(key)), testChainID, opts...)
+	if err != nil {
+		t.Fatalf("NewExchange: %v", err)
+	}
 	return ex
 }
 
-func allBooks(t *testing.T, ex *Exchange) map[symbol.Symbol]BookSnapshot {
+// start boots a fresh exchange from the WAL at path, as a (re)start would.
+// stop closes the WAL, as a shutdown would.
+func start(t *testing.T, path string, key []byte, opts ...exchange.Option) (ex *exchange.Exchange, stop func()) {
 	t.Helper()
-	books := make(map[symbol.Symbol]BookSnapshot)
+	ex = newExchange(t, opts...)
+	w, err := Recover(ex, path, key)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	closed := false
+	stop = func() {
+		if !closed {
+			closed = true
+			if err := w.Close(); err != nil {
+				t.Errorf("close wal: %v", err)
+			}
+		}
+	}
+	t.Cleanup(stop)
+	return ex, stop
+}
+
+func allBooks(t *testing.T, ex *exchange.Exchange) map[symbol.Symbol]exchange.BookSnapshot {
+	t.Helper()
+	books := make(map[symbol.Symbol]exchange.BookSnapshot)
 	for _, sym := range symbol.Configured {
 		b, err := ex.OrderBook(sym)
 		if err != nil {
-			t.Fatalf("getOrderBook(%s): %v", sym, err)
+			t.Fatalf("OrderBook(%s): %v", sym, err)
 		}
 		books[sym] = b
 	}
 	return books
 }
 
+// maxLoggedOrderID is the highest order ID in the WAL, including orders
+// that were logged and then rejected.
+func maxLoggedOrderID(t *testing.T, path string) uint64 {
+	t.Helper()
+	var max uint64
+	if _, _, _, err := wal.Replay(path, nil, func(r wal.Record) error {
+		if r.OrderID > max {
+			max = r.OrderID
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read wal: %v", err)
+	}
+	return max
+}
+
 func TestRecoverRebuildsOrderBooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wal.log")
 	alice, bob, carol := signingtest.NewTrader(t, testChainID), signingtest.NewTrader(t, testChainID), signingtest.NewTrader(t, testChainID)
-
-	ex := recovered(t, path, nil)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+
+	ex, stop := start(t, path, nil)
 	// Resting orders on both sides of two symbols.
 	_, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 10, symETH))
 	must(err)
 	_, err = ex.PlaceLimitOrder(alice.Limit(false, 3_600, 10, symETH))
 	must(err)
-	toCancelPlaced, err := ex.PlaceLimitOrder(bob.Limit(true, 3_000, 7, symETH))
-	toCancel := toCancelPlaced.Order
+	toCancel, err := ex.PlaceLimitOrder(bob.Limit(true, 3_000, 7, symETH))
 	must(err)
 	_, err = ex.PlaceLimitOrder(carol.Limit(true, 60_000, 2, symbol.Symbol("BTC")))
 	must(err)
@@ -65,35 +113,33 @@ func TestRecoverRebuildsOrderBooks(t *testing.T) {
 	_, err = ex.PlaceMarketOrder(carol.Market(true, 4, 3_600, symETH))
 	must(err)
 	// A cancel, and a market order that is logged but rejected for liquidity.
-	_, err = ex.CancelOrder(bob.Cancel(symETH, toCancel.ID))
+	_, err = ex.CancelOrder(bob.Cancel(symETH, toCancel.Order.ID))
 	must(err)
-	if _, err := ex.PlaceMarketOrder(carol.Market(true, 1_000, 10_000, symETH)); !errors.Is(err, ErrInsufficientLiquidity) {
-		t.Fatalf("placeMarketOrder: err = %v, want ErrInsufficientLiquidity", err)
+	if _, err := ex.PlaceMarketOrder(carol.Market(true, 1_000, 10_000, symETH)); !errors.Is(err, exchange.ErrInsufficientLiquidity) {
+		t.Fatalf("PlaceMarketOrder: err = %v, want ErrInsufficientLiquidity", err)
 	}
 
 	before := allBooks(t, ex)
-	lastID := ex.nextOrderID.Load()
-	must(ex.Close())
+	stop()
 
 	// Restart.
-	ex2 := recovered(t, path, nil)
+	ex2, stop2 := start(t, path, nil)
 	if after := allBooks(t, ex2); !reflect.DeepEqual(before, after) {
 		t.Fatalf("books after recovery differ:\nbefore %+v\nafter  %+v", before, after)
 	}
-	if got := ex2.nextOrderID.Load(); got != lastID {
-		t.Fatalf("nextOrderID = %d, want %d", got, lastID)
-	}
 
-	// New orders continue after the recovered IDs and are logged too.
-	oPlaced, err := ex2.PlaceLimitOrder(alice.Limit(false, 3_700, 1, symETH))
-	o := oPlaced.Order
+	// New orders continue after every recovered ID (even the rejected order's) and are logged too.
+	lastID := maxLoggedOrderID(t, path)
+	placed, err := ex2.PlaceLimitOrder(alice.Limit(false, 3_700, 1, symETH))
 	must(err)
-	if o.ID <= lastID {
-		t.Fatalf("new order ID %d, want > %d", o.ID, lastID)
+	if placed.Order.ID <= lastID {
+		t.Fatalf("new order ID %d, want > %d", placed.Order.ID, lastID)
 	}
 	afterNew := allBooks(t, ex2)
-	must(ex2.Close())
-	if again := allBooks(t, recovered(t, path, nil)); !reflect.DeepEqual(afterNew, again) {
+	stop2()
+
+	ex3, _ := start(t, path, nil)
+	if again := allBooks(t, ex3); !reflect.DeepEqual(afterNew, again) {
 		t.Fatalf("second recovery differs:\nwant %+v\ngot  %+v", afterNew, again)
 	}
 }
@@ -102,16 +148,16 @@ func TestRecoverRebuildsUsedNonces(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wal.log")
 	alice := signingtest.NewTrader(t, testChainID)
 
-	ex := recovered(t, path, nil)
+	ex, stop := start(t, path, nil)
 	msg, sig := alice.Limit(true, 3_000, 10, symETH)
 	if _, err := ex.PlaceLimitOrder(msg, sig); err != nil {
-		t.Fatalf("placeLimitOrder: %v", err)
+		t.Fatalf("PlaceLimitOrder: %v", err)
 	}
-	ex.Close()
+	stop()
 
 	// The same signed order replayed after a restart is still rejected.
-	ex2 := recovered(t, path, nil)
-	if _, err := ex2.PlaceLimitOrder(msg, sig); !errors.Is(err, ErrNonceUsed) {
+	ex2, _ := start(t, path, nil)
+	if _, err := ex2.PlaceLimitOrder(msg, sig); !errors.Is(err, exchange.ErrNonceUsed) {
 		t.Fatalf("replayed order after restart: err = %v, want ErrNonceUsed", err)
 	}
 }
@@ -119,25 +165,19 @@ func TestRecoverRebuildsUsedNonces(t *testing.T) {
 func TestRecoverReplaysAtOriginalTime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wal.log")
 	alice := signingtest.NewTrader(t, testChainID)
-	start := time.Now()
+	t0 := time.Now()
 
-	ex := recovered(t, path, nil)
-	ex.now = func() time.Time { return start }
+	ex, stop := start(t, path, nil, exchange.WithClock(func() time.Time { return t0 }))
 	msg := alice.NewOrder(true, 10, 3_000, symETH)
-	msg.Expiry = uint64(start.Add(10 * time.Second).Unix())
+	msg.Expiry = uint64(t0.Add(10 * time.Second).Unix())
 	if _, err := ex.PlaceLimitOrder(msg, alice.Sign(msg.TypedData(testChainID))); err != nil {
-		t.Fatalf("placeLimitOrder: %v", err)
+		t.Fatalf("PlaceLimitOrder: %v", err)
 	}
-	ex.Close()
+	stop()
 
 	// Restart after the order expired: replay must still accept it (it was
 	// valid when placed), and only then does it expire out of the book.
-	ex2 := newTestExchange(t)
-	ex2.now = func() time.Time { return start.Add(time.Hour) }
-	if err := ex2.Recover(path, nil); err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-	defer ex2.Close()
+	ex2, _ := start(t, path, nil, exchange.WithClock(func() time.Time { return t0.Add(time.Hour) }))
 	if book, _ := ex2.OrderBook(symETH); len(book.Bids) != 0 {
 		t.Fatalf("expired order still shown after recovery: %+v", book.Bids)
 	}
@@ -147,11 +187,11 @@ func TestRecoverRejectsTamperedRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wal.log")
 	alice := signingtest.NewTrader(t, testChainID)
 
-	ex := recovered(t, path, nil)
+	ex, stop := start(t, path, nil)
 	if _, err := ex.PlaceLimitOrder(alice.Limit(true, 3_000, 10, symETH)); err != nil {
-		t.Fatalf("placeLimitOrder: %v", err)
+		t.Fatalf("PlaceLimitOrder: %v", err)
 	}
-	ex.Close()
+	stop()
 
 	// Even with no HMAC key, changing the size breaks the maker's signature.
 	data, err := os.ReadFile(path)
@@ -166,7 +206,7 @@ func TestRecoverRejectsTamperedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := newTestExchange(t).Recover(path, nil); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := Recover(newExchange(t), path, nil); !errors.Is(err, exchange.ErrInvalidSignature) {
 		t.Fatalf("Recover tampered wal: err = %v, want ErrInvalidSignature", err)
 	}
 }
@@ -176,13 +216,13 @@ func TestRecoverWithHMACDetectsDeletedRecord(t *testing.T) {
 	key := []byte("test-hmac-key")
 	alice := signingtest.NewTrader(t, testChainID)
 
-	ex := recovered(t, path, key)
+	ex, stop := start(t, path, key)
 	for _, p := range []uint64{3_000, 3_100, 3_200} {
 		if _, err := ex.PlaceLimitOrder(alice.Limit(true, p, 10, symETH)); err != nil {
-			t.Fatalf("placeLimitOrder: %v", err)
+			t.Fatalf("PlaceLimitOrder: %v", err)
 		}
 	}
-	ex.Close()
+	stop()
 
 	// Deleting a validly signed record can't be caught by order signatures, only by the chain.
 	data, err := os.ReadFile(path)
@@ -194,7 +234,26 @@ func TestRecoverWithHMACDetectsDeletedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := newTestExchange(t).Recover(path, key); !errors.Is(err, wal.ErrIntegrityViolation) {
+	if _, err := Recover(newExchange(t), path, key); !errors.Is(err, wal.ErrIntegrityViolation) {
 		t.Fatalf("Recover with deleted record: err = %v, want wal.ErrIntegrityViolation", err)
+	}
+}
+
+func TestRecordRoundTrip(t *testing.T) {
+	alice := signingtest.NewTrader(t, testChainID)
+	order, sig := alice.Market(false, 5, 3_000, symETH)
+	cancel, csig := alice.Cancel(symETH, 9)
+
+	for _, a := range []exchange.Action{
+		{Kind: exchange.ActionPlaceMarket, Time: 100, OrderID: 7, Order: order, Signature: sig},
+		{Kind: exchange.ActionCancel, Time: 101, OrderID: 9, Cancel: cancel, Signature: csig},
+	} {
+		got, err := fromRecord(toRecord(a))
+		if err != nil {
+			t.Fatalf("fromRecord: %v", err)
+		}
+		if !reflect.DeepEqual(got, a) {
+			t.Fatalf("round trip:\ngot  %+v\nwant %+v", got, a)
+		}
 	}
 }

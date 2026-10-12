@@ -10,12 +10,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
 	"github.com/knl110/crypto-exchange/internal/signing"
 	"github.com/knl110/crypto-exchange/internal/symbol"
-	"github.com/knl110/crypto-exchange/internal/wal"
 )
 
 // Exchange coordinates trading across all configured symbols.
@@ -30,23 +28,30 @@ type Exchange struct {
 	nextOrderID atomic.Uint64
 
 	// now is the exchange's clock. Each operation reads it once and applies
-	// entirely at that time (see SymbolBook.now), so it can be replayed exactly.
+	// entirely at that time (see symbol.Book.Lock), so it can be replayed exactly.
 	now func() time.Time
 
-	// wal durably logs every accepted order and cancel before it is applied,
-	// so Recover can rebuild the books after a restart. nil means nothing is
-	// persisted (no Recover called).
-	wal *wal.WAL
+	// journal durably records every accepted order and cancel before it is
+	// applied, so the books can be rebuilt with Replay. nil records nothing.
+	journal Journal
 
-	// usedNonces stops a signed order from being submitted twice. Recover
-	// rebuilds it from the WAL.
+	// usedNonces stops a signed order from being submitted twice. Replay
+	// rebuilds it.
 	noncesMu   sync.Mutex
 	usedNonces map[common.Address]map[uint64]struct{}
 }
 
+// Option configures an Exchange.
+type Option func(*Exchange)
+
+// WithClock replaces the exchange's clock (time.Now by default).
+func WithClock(now func() time.Time) Option {
+	return func(e *Exchange) { e.now = now }
+}
+
 // NewExchange creates an Exchange with an empty order book for each symbol.
 // chainID is part of the EIP-712 domain, so signatures from other chains are rejected.
-func NewExchange(privateKey string, chainID *big.Int) (*Exchange, error) {
+func NewExchange(privateKey string, chainID *big.Int, opts ...Option) (*Exchange, error) {
 	prvKey, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key(Exchange): %w", err)
@@ -60,6 +65,9 @@ func NewExchange(privateKey string, chainID *big.Int) (*Exchange, error) {
 	}
 	for _, sym := range symbol.Configured {
 		e.orderBooks[sym] = symbol.NewBook(sym)
+	}
+	for _, opt := range opts {
+		opt(e)
 	}
 	return e, nil
 }
@@ -79,32 +87,6 @@ func (e *Exchange) Symbols() []symbol.Symbol {
 		symbols = append(symbols, s)
 	}
 	return symbols
-}
-
-// replayed carries what Recover takes from a WAL record instead of
-// generating it live: the original time and order ID. nil means live.
-type replayed struct {
-	ts      int64
-	orderID uint64
-}
-
-// opTime is the unix time (seconds) an operation runs at.
-func (e *Exchange) opTime(rp *replayed) int64 {
-	if rp != nil {
-		return rp.ts
-	}
-	return e.now().Unix()
-}
-
-// logAction appends rec to the WAL. Replayed actions are already in it.
-func (e *Exchange) logAction(rp *replayed, rec wal.Record) error {
-	if rp != nil || e.wal == nil {
-		return nil
-	}
-	if _, err := e.wal.Append(rec); err != nil {
-		return fmt.Errorf("append wal: %w", err)
-	}
-	return nil
 }
 
 // authorizeOrder checks the maker signed msg, that it has not expired at ts,
@@ -170,9 +152,9 @@ func (e *Exchange) PlaceMarketOrder(msg signing.Order, sig []byte) (Placed, erro
 //
 // TODO:consider the performance impact of copying the order struct in all these services
 func (e *Exchange) placeOrder(msg signing.Order, sig []byte, market bool, rp *replayed) (Placed, error) {
-	op, action := "PlaceLimitOrder (Exchange)", wal.ActionPlaceLimit
+	op, kind := "PlaceLimitOrder (Exchange)", ActionPlaceLimit
 	if market {
-		op, action = "PlaceMarketOrder (Exchange)", wal.ActionPlaceMarket
+		op, kind = "PlaceMarketOrder (Exchange)", ActionPlaceMarket
 	}
 	fail := func(err error) (Placed, error) {
 		return Placed{}, fmt.Errorf("%s: %w", op, err)
@@ -209,21 +191,9 @@ func (e *Exchange) placeOrder(msg signing.Order, sig []byte, market bool, rp *re
 		id = e.nextOrderID.Add(1)
 	}
 
-	// Logged before it touches the book: if the engine then rejects it, replay
-	// rejects it the same way, so the rebuilt book still matches.
-	if err := e.logAction(rp, wal.Record{
-		Timestamp: ts,
-		Symbol:    string(msg.Symbol),
-		Action:    action,
-		OrderID:   id,
-		Maker:     msg.Maker.Hex(),
-		IsBid:     msg.IsBid,
-		Size:      msg.Size,
-		Price:     msg.Price,
-		Nonce:     msg.Nonce,
-		Expiry:    msg.Expiry,
-		Signature: hexutil.Encode(sig),
-	}); err != nil {
+	// Journaled before it touches the book: if the engine then rejects it,
+	// replay rejects it the same way, so the rebuilt book still matches.
+	if err := e.logAction(rp, Action{Kind: kind, Time: ts, OrderID: id, Order: msg, Signature: sig}); err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
 		return fail(err)
 	}
@@ -281,14 +251,7 @@ func (e *Exchange) cancel(msg signing.Cancel, sig []byte, rp *replayed) (*matche
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrNotOrderOwner)
 	}
 
-	if err := e.logAction(rp, wal.Record{
-		Timestamp: ts,
-		Symbol:    string(msg.Symbol),
-		Action:    wal.ActionCancel,
-		OrderID:   msg.OrderID,
-		Maker:     msg.Maker.Hex(),
-		Signature: hexutil.Encode(sig),
-	}); err != nil {
+	if err := e.logAction(rp, Action{Kind: ActionCancel, Time: ts, OrderID: msg.OrderID, Cancel: msg, Signature: sig}); err != nil {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
 

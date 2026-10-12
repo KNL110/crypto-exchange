@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+	"github.com/knl110/crypto-exchange/internal/symbol"
 	"github.com/knl110/crypto-exchange/internal/wal"
 )
 
@@ -24,7 +25,7 @@ import (
 type Exchange struct {
 	privateKey  *ecdsa.PrivateKey
 	chainID     *big.Int
-	orderBooks  map[Symbol]*SymbolBook
+	orderBooks  map[symbol.Symbol]*symbol.Book
 	nextOrderID atomic.Uint64
 
 	// now is the exchange's clock. Each operation reads it once and applies
@@ -50,22 +51,20 @@ func NewExchange(privateKey string, chainID *big.Int) (*Exchange, error) {
 		return nil, fmt.Errorf("failed to parse private key(Exchange): %w", err)
 	}
 	e := &Exchange{
-		orderBooks: make(map[Symbol]*SymbolBook),
+		orderBooks: make(map[symbol.Symbol]*symbol.Book),
 		privateKey: prvKey,
 		chainID:    chainID,
 		now:        time.Now,
 		usedNonces: make(map[common.Address]map[uint64]struct{}),
 	}
-	for _, sym := range symbols {
-		sb := newSymbolBook(sym)
-		sb.book.SetClock(func() uint64 { return sb.now })
-		e.orderBooks[sym] = sb
+	for _, sym := range symbol.Configured {
+		e.orderBooks[sym] = symbol.NewBook(sym)
 	}
 	return e, nil
 }
 
-func (e *Exchange) symbolBook(symbol Symbol) (*SymbolBook, error) {
-	sb, ok := e.orderBooks[symbol]
+func (e *Exchange) symbolBook(sym symbol.Symbol) (*symbol.Book, error) {
+	sb, ok := e.orderBooks[sym]
 	if !ok {
 		return nil, ErrUnknownSymbol
 	}
@@ -73,8 +72,8 @@ func (e *Exchange) symbolBook(symbol Symbol) (*SymbolBook, error) {
 }
 
 // Symbols returns the configured trading symbols.
-func (e *Exchange) Symbols() []Symbol {
-	symbols := make([]Symbol, 0, len(e.orderBooks))
+func (e *Exchange) Symbols() []symbol.Symbol {
+	symbols := make([]symbol.Symbol, 0, len(e.orderBooks))
 	for s := range e.orderBooks {
 		symbols = append(symbols, s)
 	}
@@ -189,9 +188,8 @@ func (e *Exchange) placeOrder(msg OrderMessage, sig []byte, market bool, rp *rep
 		return fail(err)
 	}
 
-	sb.mu.Lock()
-	defer sb.mu.Unlock()
-	sb.now = uint64(ts)
+	ob := sb.Lock(uint64(ts))
+	defer sb.Unlock()
 
 	var id uint64
 	if rp != nil {
@@ -225,9 +223,9 @@ func (e *Exchange) placeOrder(msg OrderMessage, sig []byte, market bool, rp *rep
 	var matched []matchengine.MatchedOrder
 	var cancelled []*matchengine.Order
 	if market {
-		matched, cancelled, err = sb.book.PlaceMarketOrder(order, msg.Price)
+		matched, cancelled, err = ob.PlaceMarketOrder(order, msg.Price)
 	} else {
-		matched, cancelled, err = sb.book.PlaceLimitOrder(order, msg.Price)
+		matched, cancelled, err = ob.PlaceLimitOrder(order, msg.Price)
 	}
 	if err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
@@ -259,11 +257,10 @@ func (e *Exchange) cancel(msg CancelMessage, sig []byte, rp *replayed) (*matchen
 	}
 
 	ts := e.opTime(rp)
-	sb.mu.Lock()
-	defer sb.mu.Unlock()
-	sb.now = uint64(ts)
+	ob := sb.Lock(uint64(ts))
+	defer sb.Unlock()
 
-	resting, ok := sb.book.GetOrder(msg.OrderID)
+	resting, ok := ob.GetOrder(msg.OrderID)
 	if !ok {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", ErrOrderNotFound)
 	}
@@ -282,7 +279,7 @@ func (e *Exchange) cancel(msg CancelMessage, sig []byte, rp *replayed) (*matchen
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
 
-	order, err := sb.book.CancelOrder(msg.OrderID)
+	order, err := ob.CancelOrder(msg.OrderID)
 	if err != nil {
 		if errors.Is(err, matchengine.ErrOrderNotFound) {
 			err = ErrOrderNotFound
@@ -295,14 +292,13 @@ func (e *Exchange) cancel(msg CancelMessage, sig []byte, rp *replayed) (*matchen
 // getOrderBook returns a snapshot of sym's book. It is built while the lock
 // is held: the book's levels and orders are shared, mutable state, so reading
 // them after unlocking would race with incoming orders.
-func (e *Exchange) getOrderBook(sym Symbol) (orderBookResponse, error) {
+func (e *Exchange) getOrderBook(sym symbol.Symbol) (orderBookResponse, error) {
 	sb, err := e.symbolBook(sym)
 	if err != nil {
 		return orderBookResponse{}, fmt.Errorf("GetOrderBook (Exchange): %w", err)
 	}
-	sb.mu.Lock()
-	defer sb.mu.Unlock()
-	sb.now = uint64(e.now().Unix())
-	sb.book.PurgeExpired()
-	return newOrderBookResponse(sb.book, sym), nil
+	ob := sb.Lock(uint64(e.now().Unix()))
+	defer sb.Unlock()
+	ob.PurgeExpired()
+	return newOrderBookResponse(ob, sym), nil
 }

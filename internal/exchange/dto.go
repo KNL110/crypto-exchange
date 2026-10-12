@@ -4,6 +4,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+
+	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
 // signedOrderRequest is an EIP-712 signed order (see signing.go). Limit and
@@ -23,7 +25,7 @@ type signedOrderRequest struct {
 func (r signedOrderRequest) message() OrderMessage {
 	return OrderMessage{
 		Maker:    r.Maker,
-		Symbol:   Symbol(r.Symbol),
+		Symbol:   symbol.Symbol(r.Symbol),
 		IsBid:    r.IsBid,
 		IsMarket: r.IsMarket,
 		Size:     r.Size,
@@ -43,7 +45,7 @@ type cancelOrderRequest struct {
 func (r cancelOrderRequest) message() CancelMessage {
 	return CancelMessage{
 		Maker:   r.Maker,
-		Symbol:  Symbol(r.Symbol),
+		Symbol:  symbol.Symbol(r.Symbol),
 		OrderID: r.OrderID,
 	}
 }
@@ -59,16 +61,16 @@ type ManyOrderBookRequest struct {
 }
 
 type orderResponse struct {
-	Id     uint64  `json:"id"`
-	Maker  string  `json:"maker"`
-	Symbol string  `json:"symbol"`
-	Side   string  `json:"side"`
-	Size   uint64  `json:"size"`
-	Filled uint64  `json:"filled"`
-	Price  uint64  `json:"price,omitempty"`
+	Id     uint64 `json:"id"`
+	Maker  string `json:"maker"`
+	Symbol string `json:"symbol"`
+	Side   string `json:"side"`
+	Size   uint64 `json:"size"`
+	Filled uint64 `json:"filled"`
+	Price  uint64 `json:"price,omitempty"`
 }
 
-func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
+func newOrderResponse(order *matchengine.Order, symbol symbol.Symbol) orderResponse {
 	res := orderResponse{
 		Id:     order.ID,
 		Maker:  order.Maker.Hex(),
@@ -105,7 +107,7 @@ func newMatchedOrderResponse(m matchengine.MatchedOrder) matchedOrderResponse {
 	}
 }
 
-func newPlaceOrderResponse(order *matchengine.Order, symbol Symbol, matches *[]matchengine.MatchedOrder, cancelled []*matchengine.Order) placeOrderResponse {
+func newPlaceOrderResponse(order *matchengine.Order, symbol symbol.Symbol, matches *[]matchengine.MatchedOrder, cancelled []*matchengine.Order) placeOrderResponse {
 	res := placeOrderResponse{
 		Order:     newOrderResponse(order, symbol),
 		Matches:   make([]matchedOrderResponse, 0, len(*matches)),
@@ -130,12 +132,12 @@ func newErrorResponse(err error) errorResponse {
 
 type limitResponse struct {
 	Price        uint64          `json:"price"`
-	TotalVolumne uint64           `json:"totalVolume"`
-	TotalOrders  uint64           `json:"totalOrders"`
+	TotalVolumne uint64          `json:"totalVolume"`
+	TotalOrders  uint64          `json:"totalOrders"`
 	Orders       []orderResponse `json:"orders"`
 }
 
-func newLimitResponse(lim *matchengine.Limit, symbol Symbol) limitResponse {
+func newLimitResponse(lim *matchengine.Limit, symbol symbol.Symbol) limitResponse {
 	res := limitResponse{
 		Price:        lim.Price,
 		TotalVolumne: lim.TotalVolume,
@@ -155,7 +157,7 @@ type orderBookResponse struct {
 	Asks   []limitResponse `json:"asks"`
 }
 
-func newOrderBookResponse(book *matchengine.OrderBook, symbol Symbol) orderBookResponse {
+func newOrderBookResponse(book *matchengine.OrderBook, symbol symbol.Symbol) orderBookResponse {
 	res := orderBookResponse{
 		Symbol: string(symbol),
 		Bids:   make([]limitResponse, 0, len(book.BidLimits)),
@@ -175,7 +177,7 @@ type healthResponse struct {
 	Symbols []string `json:"symbols"`
 }
 
-func newHealthResponse(status string, symbols []Symbol) healthResponse {
+func newHealthResponse(status string, symbols []symbol.Symbol) healthResponse {
 	res := healthResponse{
 		Status:  status,
 		Symbols: make([]string, 0, len(symbols)),

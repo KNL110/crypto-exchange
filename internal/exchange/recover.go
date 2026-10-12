@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/rs/zerolog/log"
 
+	"github.com/knl110/crypto-exchange/internal/symbol"
 	"github.com/knl110/crypto-exchange/internal/wal"
 )
 
@@ -75,7 +76,7 @@ func (e *Exchange) replay(rec wal.Record) error {
 		market := rec.Action == wal.ActionPlaceMarket
 		msg := OrderMessage{
 			Maker:    maker,
-			Symbol:   Symbol(rec.Symbol),
+			Symbol:   symbol.Symbol(rec.Symbol),
 			IsBid:    rec.IsBid,
 			IsMarket: market,
 			Size:     rec.Size,
@@ -90,7 +91,7 @@ func (e *Exchange) replay(rec wal.Record) error {
 		}
 
 	case wal.ActionCancel:
-		msg := CancelMessage{Maker: maker, Symbol: Symbol(rec.Symbol), OrderID: rec.OrderID}
+		msg := CancelMessage{Maker: maker, Symbol: symbol.Symbol(rec.Symbol), OrderID: rec.OrderID}
 		if _, err := e.cancel(msg, sig, rp); err != nil {
 			return fmt.Errorf("record seq=%d: %w", rec.Seq, err)
 		}

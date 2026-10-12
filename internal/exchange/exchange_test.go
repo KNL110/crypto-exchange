@@ -13,12 +13,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
+	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
 const (
-	symETH = Symbol("ETH")
+	symETH = symbol.Symbol("ETH")
 	// symUnknown is not configured on the exchange.
-	symUnknown = Symbol("DOGE")
+	symUnknown = symbol.Symbol("DOGE")
 )
 
 var testChainID = big.NewInt(1337)
@@ -69,7 +70,7 @@ func (tr *trader) sign(td apitypes.TypedData) []byte {
 	return sig
 }
 
-func (tr *trader) newOrder(isBid bool, size, price uint64, sym Symbol) OrderMessage {
+func (tr *trader) newOrder(isBid bool, size, price uint64, sym symbol.Symbol) OrderMessage {
 	return OrderMessage{
 		Maker:  tr.addr,
 		Symbol: sym,
@@ -81,42 +82,42 @@ func (tr *trader) newOrder(isBid bool, size, price uint64, sym Symbol) OrderMess
 	}
 }
 
-func (tr *trader) limit(isBid bool, price, size uint64, sym Symbol) (OrderMessage, []byte) {
+func (tr *trader) limit(isBid bool, price, size uint64, sym symbol.Symbol) (OrderMessage, []byte) {
 	msg := tr.newOrder(isBid, size, price, sym)
 	return msg, tr.sign(msg.typedData(testChainID))
 }
 
 // market signs a market order that accepts fills up to worstPrice.
-func (tr *trader) market(isBid bool, size, worstPrice uint64, sym Symbol) (OrderMessage, []byte) {
+func (tr *trader) market(isBid bool, size, worstPrice uint64, sym symbol.Symbol) (OrderMessage, []byte) {
 	msg := tr.newOrder(isBid, size, worstPrice, sym)
 	msg.IsMarket = true
 	return msg, tr.sign(msg.typedData(testChainID))
 }
 
-func (tr *trader) cancel(sym Symbol, orderID uint64) (CancelMessage, []byte) {
+func (tr *trader) cancel(sym symbol.Symbol, orderID uint64) (CancelMessage, []byte) {
 	msg := CancelMessage{Maker: tr.addr, Symbol: sym, OrderID: orderID}
 	return msg, tr.sign(msg.typedData(testChainID))
 }
 
 // bookVolume returns the total resting size on each side of sym's book.
-func bookVolume(t *testing.T, ex *Exchange, sym Symbol) (bids, asks uint64) {
+func bookVolume(t *testing.T, ex *Exchange, sym symbol.Symbol) (bids, asks uint64) {
 	t.Helper()
 	sb, err := ex.symbolBook(sym)
 	if err != nil {
 		t.Fatalf("symbolBook: %v", err)
 	}
-	sb.mu.Lock()
-	defer sb.mu.Unlock()
-	return sb.book.BidTotalVolume(), sb.book.AskTotalVolume()
+	ob := sb.Lock(uint64(time.Now().Unix()))
+	defer sb.Unlock()
+	return ob.BidTotalVolume(), ob.AskTotalVolume()
 }
 
 func TestNewExchangeRegistersConfiguredSymbols(t *testing.T) {
 	ex := newTestExchange(t)
 
-	if syms := ex.Symbols(); len(syms) != len(symbols) {
-		t.Fatalf("Symbols() = %v, want %v", syms, symbols)
+	if syms := ex.Symbols(); len(syms) != len(symbol.Configured) {
+		t.Fatalf("Symbols() = %v, want %v", syms, symbol.Configured)
 	}
-	for _, sym := range symbols {
+	for _, sym := range symbol.Configured {
 		if _, err := ex.symbolBook(sym); err != nil {
 			t.Fatalf("symbolBook(%s): %v", sym, err)
 		}

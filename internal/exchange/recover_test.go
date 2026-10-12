@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/knl110/crypto-exchange/internal/symbol"
 	"github.com/knl110/crypto-exchange/internal/wal"
 )
 
@@ -23,10 +24,10 @@ func recovered(t *testing.T, path string, key []byte) *Exchange {
 	return ex
 }
 
-func allBooks(t *testing.T, ex *Exchange) map[Symbol]orderBookResponse {
+func allBooks(t *testing.T, ex *Exchange) map[symbol.Symbol]orderBookResponse {
 	t.Helper()
-	books := make(map[Symbol]orderBookResponse)
-	for _, sym := range symbols {
+	books := make(map[symbol.Symbol]orderBookResponse)
+	for _, sym := range symbol.Configured {
 		b, err := ex.getOrderBook(sym)
 		if err != nil {
 			t.Fatalf("getOrderBook(%s): %v", sym, err)
@@ -54,7 +55,7 @@ func TestRecoverRebuildsOrderBooks(t *testing.T) {
 	must(err)
 	_, toCancel, _, err := ex.placeLimitOrder(bob.limit(true, 3_000, 7, symETH))
 	must(err)
-	_, _, _, err = ex.placeLimitOrder(carol.limit(true, 60_000, 2, Symbol("BTC")))
+	_, _, _, err = ex.placeLimitOrder(carol.limit(true, 60_000, 2, symbol.Symbol("BTC")))
 	must(err)
 	// A crossing limit order (fills 10 @ 3500, 5 rest at 3550) and a market order.
 	_, _, _, err = ex.placeLimitOrder(bob.limit(true, 3_550, 15, symETH))

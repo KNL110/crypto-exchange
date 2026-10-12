@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
+	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
 // Orders and cancels are EIP-712 typed data. A wallet signs them with
@@ -48,7 +49,7 @@ var eip712Types = apitypes.Types{
 // Expiry is a unix timestamp in seconds.
 type OrderMessage struct {
 	Maker    common.Address
-	Symbol   Symbol
+	Symbol   symbol.Symbol
 	IsBid    bool
 	IsMarket bool
 	Size     uint64
@@ -60,7 +61,7 @@ type OrderMessage struct {
 // CancelMessage is what a maker signs to cancel one of their resting orders.
 type CancelMessage struct {
 	Maker   common.Address
-	Symbol  Symbol
+	Symbol  symbol.Symbol
 	OrderID uint64
 }
 
@@ -82,8 +83,8 @@ func (m OrderMessage) typedData(chainID *big.Int) apitypes.TypedData {
 		PrimaryType: "Order",
 		Domain:      domain(chainID),
 		Message: apitypes.TypedDataMessage{
-			"maker":  m.Maker.Hex(),
-			"symbol": string(m.Symbol),
+			"maker":    m.Maker.Hex(),
+			"symbol":   string(m.Symbol),
 			"isBid":    m.IsBid,
 			"isMarket": m.IsMarket,
 			"size":     u256(m.Size),

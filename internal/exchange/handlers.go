@@ -4,6 +4,8 @@ import (
 	"errors"
 	"github.com/labstack/echo/v5"
 	"net/http"
+
+	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
 type Handler struct {
@@ -14,7 +16,7 @@ func NewHandler(ex *Exchange) *Handler {
 	return &Handler{ex: ex}
 }
 
-func side(isbid bool) string{
+func side(isbid bool) string {
 	if isbid {
 		return "buy"
 	} else {
@@ -51,11 +53,11 @@ func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
-	symbol := Symbol(req.Symbol)
+	symbol := symbol.Symbol(req.Symbol)
 
 	matches, order, cancelled, err := h.ex.placeLimitOrder(req.message(), req.Signature)
 	if err != nil {
-		return h.mapError(c,err)
+		return h.mapError(c, err)
 	}
 	return c.JSON(http.StatusCreated, newPlaceOrderResponse(order, symbol, &matches, cancelled))
 }
@@ -66,11 +68,11 @@ func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
-	symbol := Symbol(req.Symbol)
+	symbol := symbol.Symbol(req.Symbol)
 
 	matches, order, cancelled, err := h.ex.placeMarketOrder(req.message(), req.Signature)
 	if err != nil {
-		return h.mapError(c,err)
+		return h.mapError(c, err)
 	}
 	return c.JSON(http.StatusCreated, newPlaceOrderResponse(order, symbol, &matches, cancelled))
 }
@@ -81,14 +83,14 @@ func (h *Handler) CancelOrder(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
-	symbol := Symbol(req.Symbol)
+	symbol := symbol.Symbol(req.Symbol)
 
 	order, err := h.ex.cancelOrder(req.message(), req.Signature)
 	if err != nil {
-		return h.mapError(c,err)
+		return h.mapError(c, err)
 	}
 	return c.JSON(http.StatusOK, newOrderResponse(order, symbol))
-}	
+}
 
 func (h *Handler) OrderBook(c *echo.Context) error {
 	var req orderBookRequest
@@ -96,11 +98,11 @@ func (h *Handler) OrderBook(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
 	}
-	symbol := Symbol(req.Symbol)
+	symbol := symbol.Symbol(req.Symbol)
 
 	orderBook, err := h.ex.getOrderBook(symbol)
 	if err != nil {
-		return h.mapError(c,err)
+		return h.mapError(c, err)
 	}
 	return c.JSON(http.StatusOK, orderBook)
 }
@@ -114,16 +116,17 @@ func (h *Handler) ManyOrderBooks(c *echo.Context) error {
 
 	orderBooks := make(map[string]orderBookResponse)
 	for _, symStr := range req.Symbols {
-		symbol := Symbol(symStr)
+		symbol := symbol.Symbol(symStr)
 		orderBook, err := h.ex.getOrderBook(symbol)
 		if err != nil {
-			return h.mapError(c,err)
+			return h.mapError(c, err)
 		}
 		orderBooks[symStr] = orderBook
 	}
 
 	return c.JSON(http.StatusOK, orderBooks)
 }
+
 // Health reports server status along with the configured trading symbols.
 func (h *Handler) Health(c *echo.Context) error {
 	return c.JSON(http.StatusOK, newHealthResponse("ok", h.ex.Symbols()))

@@ -25,6 +25,10 @@ type Exchange struct {
 	orderBooks  map[Symbol]*SymbolBook
 	nextOrderID atomic.Uint64
 
+	// now is the one clock for the exchange and all its books: it decides
+	// both whether a new order has expired and when resting orders expire.
+	now func() time.Time
+
 	// usedNonces stops a signed order from being submitted twice.
 	// TODO: persist this; it is lost on restart.
 	noncesMu   sync.Mutex
@@ -34,20 +38,24 @@ type Exchange struct {
 // NewExchange creates an Exchange with an empty order book for each symbol.
 // chainID is part of the EIP-712 domain, so signatures from other chains are rejected.
 func NewExchange(privateKey string, chainID *big.Int) (*Exchange, error) {
-	books := make(map[Symbol]*SymbolBook)
-	for _, sym := range symbols {
-		books[sym] = newSymbolBook(sym)
-	}
 	prvKey, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key(Exchange): %w", err)
 	}
-	return &Exchange{
-		orderBooks: books,
+	e := &Exchange{
+		orderBooks: make(map[Symbol]*SymbolBook),
 		privateKey: prvKey,
 		chainID:    chainID,
+		now:        time.Now,
 		usedNonces: make(map[common.Address]map[uint64]struct{}),
-	}, nil
+	}
+	for _, sym := range symbols {
+		sb := newSymbolBook(sym)
+		// Read e.now on every call, so replacing it later affects the books too.
+		sb.book.SetClock(func() uint64 { return uint64(e.now().Unix()) })
+		e.orderBooks[sym] = sb
+	}
+	return e, nil
 }
 
 func (e *Exchange) symbolBook(symbol Symbol) (*SymbolBook, error) {
@@ -77,7 +85,7 @@ func (e *Exchange) authorizeOrder(msg OrderMessage, sig []byte) error {
 	if signer != msg.Maker {
 		return ErrInvalidSignature
 	}
-	if msg.Expiry <= uint64(time.Now().Unix()) {
+	if msg.Expiry <= uint64(e.now().Unix()) {
 		return ErrOrderExpired
 	}
 

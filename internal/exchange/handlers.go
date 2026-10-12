@@ -101,7 +101,7 @@ func (h *Handler) OrderBook(c *echo.Context) error {
 	if err != nil {
 		return h.mapError(c,err)
 	}
-	return c.JSON(http.StatusOK, newOrderBookResponse(orderBook, symbol))
+	return c.JSON(http.StatusOK, orderBook)
 }
 
 func (h *Handler) ManyOrderBooks(c *echo.Context) error {
@@ -118,7 +118,7 @@ func (h *Handler) ManyOrderBooks(c *echo.Context) error {
 		if err != nil {
 			return h.mapError(c,err)
 		}
-		orderBooks[symStr] = newOrderBookResponse(orderBook, symbol)
+		orderBooks[symStr] = orderBook
 	}
 
 	return c.JSON(http.StatusOK, orderBooks)

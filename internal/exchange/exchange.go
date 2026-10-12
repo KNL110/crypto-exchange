@@ -213,13 +213,15 @@ func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Orde
 	return order, nil
 }
 
-func (e *Exchange) getOrderBook(sym Symbol) (*matchengine.OrderBook, error) {
+// getOrderBook returns a snapshot of sym's book. It is built while the lock
+// is held: the book's levels and orders are shared, mutable state, so reading
+// them after unlocking would race with incoming orders.
+func (e *Exchange) getOrderBook(sym Symbol) (orderBookResponse, error) {
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return nil, fmt.Errorf("GetOrderBook (Exchange): %w", err)
+		return orderBookResponse{}, fmt.Errorf("GetOrderBook (Exchange): %w", err)
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
-	snap := *sb.book
-	return &snap, nil
+	return newOrderBookResponse(sb.book, sym), nil
 }

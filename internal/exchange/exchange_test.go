@@ -68,10 +68,11 @@ func TestPlaceLimitOrderRests(t *testing.T) {
 	ex := newTestExchange(t)
 	alice := signingtest.NewTrader(t, testChainID)
 
-	_, order, _, err := ex.placeLimitOrder(alice.Limit(false, 3_500, 10, symETH))
+	orderPlaced, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 10, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
+	order := orderPlaced.Order
 	if order.ID == 0 {
 		t.Fatalf("order ID not assigned")
 	}
@@ -92,14 +93,16 @@ func TestPlaceLimitOrderAssignsUniqueIDs(t *testing.T) {
 	ex := newTestExchange(t)
 	alice := signingtest.NewTrader(t, testChainID)
 
-	_, a, _, err := ex.placeLimitOrder(alice.Limit(true, 100, 1, symETH))
+	aPlaced, err := ex.PlaceLimitOrder(alice.Limit(true, 100, 1, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
-	_, b, _, err := ex.placeLimitOrder(alice.Limit(true, 100, 1, symETH))
+	a := aPlaced.Order
+	bPlaced, err := ex.PlaceLimitOrder(alice.Limit(true, 100, 1, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
+	b := bPlaced.Order
 	if a.ID == b.ID {
 		t.Fatalf("duplicate order ID %d", a.ID)
 	}
@@ -109,13 +112,13 @@ func TestPlaceLimitOrderRejectsBadInput(t *testing.T) {
 	ex := newTestExchange(t)
 	alice := signingtest.NewTrader(t, testChainID)
 
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(true, 100, 0, symETH)); !errors.Is(err, ErrInvalidSize) {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(true, 100, 0, symETH)); !errors.Is(err, ErrInvalidSize) {
 		t.Errorf("size=0: err = %v, want ErrInvalidSize", err)
 	}
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(true, 0, 10, symETH)); !errors.Is(err, ErrInvalidPrice) {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(true, 0, 10, symETH)); !errors.Is(err, ErrInvalidPrice) {
 		t.Errorf("price=0: err = %v, want ErrInvalidPrice", err)
 	}
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(true, 100, 10, symUnknown)); !errors.Is(err, ErrUnknownSymbol) {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(true, 100, 10, symUnknown)); !errors.Is(err, ErrUnknownSymbol) {
 		t.Errorf("unknown symbol: err = %v, want ErrUnknownSymbol", err)
 	}
 }
@@ -126,24 +129,24 @@ func TestPlaceOrderRejectsBadSignature(t *testing.T) {
 
 	// Mallory signs an order claiming to be Alice.
 	msg := alice.NewOrder(true, 10, 100, symETH)
-	if _, _, _, err := ex.placeLimitOrder(msg, mallory.Sign(msg.TypedData(testChainID))); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := ex.PlaceLimitOrder(msg, mallory.Sign(msg.TypedData(testChainID))); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("wrong signer: err = %v, want ErrInvalidSignature", err)
 	}
 
 	// Alice's signature no longer matches once the size is tampered with.
 	msg, sig := alice.Limit(true, 100, 10, symETH)
 	msg.Size = 1_000
-	if _, _, _, err := ex.placeLimitOrder(msg, sig); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := ex.PlaceLimitOrder(msg, sig); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("tampered order: err = %v, want ErrInvalidSignature", err)
 	}
 
 	// A signature for another chain must not be accepted here.
 	msg = alice.NewOrder(true, 10, 100, symETH)
-	if _, _, _, err := ex.placeLimitOrder(msg, alice.Sign(msg.TypedData(big.NewInt(1)))); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := ex.PlaceLimitOrder(msg, alice.Sign(msg.TypedData(big.NewInt(1)))); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("other chain: err = %v, want ErrInvalidSignature", err)
 	}
 
-	if _, _, _, err := ex.placeLimitOrder(msg, []byte{1, 2, 3}); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := ex.PlaceLimitOrder(msg, []byte{1, 2, 3}); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("malformed signature: err = %v, want ErrInvalidSignature", err)
 	}
 
@@ -158,7 +161,7 @@ func TestPlaceOrderRejectsExpired(t *testing.T) {
 
 	msg := alice.NewOrder(true, 10, 100, symETH)
 	msg.Expiry = uint64(time.Now().Add(-time.Minute).Unix())
-	if _, _, _, err := ex.placeLimitOrder(msg, alice.Sign(msg.TypedData(testChainID))); !errors.Is(err, ErrOrderExpired) {
+	if _, err := ex.PlaceLimitOrder(msg, alice.Sign(msg.TypedData(testChainID))); !errors.Is(err, ErrOrderExpired) {
 		t.Fatalf("expired order: err = %v, want ErrOrderExpired", err)
 	}
 }
@@ -168,10 +171,10 @@ func TestPlaceOrderRejectsReplay(t *testing.T) {
 	alice := signingtest.NewTrader(t, testChainID)
 
 	msg, sig := alice.Limit(true, 100, 10, symETH)
-	if _, _, _, err := ex.placeLimitOrder(msg, sig); err != nil {
+	if _, err := ex.PlaceLimitOrder(msg, sig); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
-	if _, _, _, err := ex.placeLimitOrder(msg, sig); !errors.Is(err, ErrNonceUsed) {
+	if _, err := ex.PlaceLimitOrder(msg, sig); !errors.Is(err, ErrNonceUsed) {
 		t.Fatalf("replayed order: err = %v, want ErrNonceUsed", err)
 	}
 	if bids, _ := bookVolume(t, ex, symETH); bids != 10 {
@@ -184,15 +187,16 @@ func TestPlaceMarketOrderFillsAcrossLevels(t *testing.T) {
 	alice, bob := signingtest.NewTrader(t, testChainID), signingtest.NewTrader(t, testChainID)
 
 	for _, p := range []uint64{3_500, 3_450, 3_400} {
-		if _, _, _, err := ex.placeLimitOrder(alice.Limit(false, p, 10, symETH)); err != nil {
+		if _, err := ex.PlaceLimitOrder(alice.Limit(false, p, 10, symETH)); err != nil {
 			t.Fatalf("placeLimitOrder: %v", err)
 		}
 	}
 
-	matches, order, _, err := ex.placeMarketOrder(bob.Market(true, 15, 10_000, symETH))
+	placed, err := ex.PlaceMarketOrder(bob.Market(true, 15, 10_000, symETH))
 	if err != nil {
 		t.Fatalf("placeMarketOrder: %v", err)
 	}
+	matches, order := placed.Matches, placed.Order
 	if !order.IsFilled() {
 		t.Fatalf("market order not fully filled, remaining size %d", order.Size)
 	}
@@ -221,15 +225,16 @@ func TestPlaceLimitOrderCrossesBook(t *testing.T) {
 	ex := newTestExchange(t)
 	alice, bob := signingtest.NewTrader(t, testChainID), signingtest.NewTrader(t, testChainID)
 
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(false, 3_500, 10, symETH)); err != nil {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 10, symETH)); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 
 	// Bob's buy at 3600 crosses Alice's 3500 ask: 10 fill at 3500, 5 rest at 3600.
-	matches, order, _, err := ex.placeLimitOrder(bob.Limit(true, 3_600, 15, symETH))
+	placed, err := ex.PlaceLimitOrder(bob.Limit(true, 3_600, 15, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
+	matches, order := placed.Matches, placed.Order
 	if len(matches) != 1 || matches[0].Price != 3_500 || matches[0].SizeFilled != 10 {
 		t.Fatalf("matches = %+v, want one fill of 10 at 3500", matches)
 	}
@@ -250,21 +255,21 @@ func TestPlaceMarketOrderRejectsBadInput(t *testing.T) {
 	ex := newTestExchange(t)
 	bob := signingtest.NewTrader(t, testChainID)
 
-	if _, _, _, err := ex.placeMarketOrder(bob.Market(true, 0, 10_000, symETH)); !errors.Is(err, ErrInvalidSize) {
+	if _, err := ex.PlaceMarketOrder(bob.Market(true, 0, 10_000, symETH)); !errors.Is(err, ErrInvalidSize) {
 		t.Errorf("size=0: err = %v, want ErrInvalidSize", err)
 	}
-	if _, _, _, err := ex.placeMarketOrder(bob.Market(true, 10, 10_000, symUnknown)); !errors.Is(err, ErrUnknownSymbol) {
+	if _, err := ex.PlaceMarketOrder(bob.Market(true, 10, 10_000, symUnknown)); !errors.Is(err, ErrUnknownSymbol) {
 		t.Errorf("unknown symbol: err = %v, want ErrUnknownSymbol", err)
 	}
 	// A market order must carry a worst price, or it could fill at any price.
-	if _, _, _, err := ex.placeMarketOrder(bob.Market(true, 10, 0, symETH)); !errors.Is(err, ErrInvalidPrice) {
+	if _, err := ex.PlaceMarketOrder(bob.Market(true, 10, 0, symETH)); !errors.Is(err, ErrInvalidPrice) {
 		t.Errorf("worst price=0: err = %v, want ErrInvalidPrice", err)
 	}
 	// A signed limit order must not be executable as a market order, and vice versa.
-	if _, _, _, err := ex.placeMarketOrder(bob.Limit(true, 100, 10, symETH)); !errors.Is(err, ErrOrderTypeMismatch) {
+	if _, err := ex.PlaceMarketOrder(bob.Limit(true, 100, 10, symETH)); !errors.Is(err, ErrOrderTypeMismatch) {
 		t.Errorf("limit order on market endpoint: err = %v, want ErrOrderTypeMismatch", err)
 	}
-	if _, _, _, err := ex.placeLimitOrder(bob.Market(true, 10, 100, symETH)); !errors.Is(err, ErrOrderTypeMismatch) {
+	if _, err := ex.PlaceLimitOrder(bob.Market(true, 10, 100, symETH)); !errors.Is(err, ErrOrderTypeMismatch) {
 		t.Errorf("market order on limit endpoint: err = %v, want ErrOrderTypeMismatch", err)
 	}
 }
@@ -273,12 +278,12 @@ func TestPlaceMarketOrderInsufficientLiquidityLeavesBookUntouched(t *testing.T) 
 	ex := newTestExchange(t)
 	alice, bob := signingtest.NewTrader(t, testChainID), signingtest.NewTrader(t, testChainID)
 
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(false, 3_500, 5, symETH)); err != nil {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 5, symETH)); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 
 	msg, sig := bob.Market(true, 100, 10_000, symETH)
-	if _, _, _, err := ex.placeMarketOrder(msg, sig); !errors.Is(err, ErrInsufficientLiquidity) {
+	if _, err := ex.PlaceMarketOrder(msg, sig); !errors.Is(err, ErrInsufficientLiquidity) {
 		t.Fatalf("placeMarketOrder: err = %v, want ErrInsufficientLiquidity", err)
 	}
 
@@ -287,10 +292,10 @@ func TestPlaceMarketOrderInsufficientLiquidityLeavesBookUntouched(t *testing.T) 
 	}
 
 	// The rejected order's nonce is released, so the same signed order can be retried.
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(false, 3_500, 95, symETH)); err != nil {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 95, symETH)); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
-	if _, _, _, err := ex.placeMarketOrder(msg, sig); err != nil {
+	if _, err := ex.PlaceMarketOrder(msg, sig); err != nil {
 		t.Fatalf("retry placeMarketOrder: %v", err)
 	}
 }
@@ -299,12 +304,13 @@ func TestCancelOrderRemovesFromBook(t *testing.T) {
 	ex := newTestExchange(t)
 	alice := signingtest.NewTrader(t, testChainID)
 
-	_, order, _, err := ex.placeLimitOrder(alice.Limit(true, 3_000, 10, symETH))
+	orderPlaced, err := ex.PlaceLimitOrder(alice.Limit(true, 3_000, 10, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
+	order := orderPlaced.Order
 
-	cancelled, err := ex.cancelOrder(alice.Cancel(symETH, order.ID))
+	cancelled, err := ex.CancelOrder(alice.Cancel(symETH, order.ID))
 	if err != nil {
 		t.Fatalf("cancelOrder: %v", err)
 	}
@@ -316,10 +322,10 @@ func TestCancelOrderRemovesFromBook(t *testing.T) {
 		t.Fatalf("bid volume after cancel = %d, want 0", bids)
 	}
 
-	if _, err := ex.cancelOrder(alice.Cancel(symETH, order.ID)); !errors.Is(err, ErrOrderNotFound) {
+	if _, err := ex.CancelOrder(alice.Cancel(symETH, order.ID)); !errors.Is(err, ErrOrderNotFound) {
 		t.Fatalf("double cancel: err = %v, want ErrOrderNotFound", err)
 	}
-	if _, err := ex.cancelOrder(alice.Cancel(symUnknown, order.ID)); !errors.Is(err, ErrUnknownSymbol) {
+	if _, err := ex.CancelOrder(alice.Cancel(symUnknown, order.ID)); !errors.Is(err, ErrUnknownSymbol) {
 		t.Fatalf("unknown symbol: err = %v, want ErrUnknownSymbol", err)
 	}
 }
@@ -328,19 +334,20 @@ func TestCancelOrderRequiresOwner(t *testing.T) {
 	ex := newTestExchange(t)
 	alice, mallory := signingtest.NewTrader(t, testChainID), signingtest.NewTrader(t, testChainID)
 
-	_, order, _, err := ex.placeLimitOrder(alice.Limit(true, 3_000, 10, symETH))
+	orderPlaced, err := ex.PlaceLimitOrder(alice.Limit(true, 3_000, 10, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
+	order := orderPlaced.Order
 
 	// Mallory validly signs a cancel for Alice's order.
-	if _, err := ex.cancelOrder(mallory.Cancel(symETH, order.ID)); !errors.Is(err, ErrNotOrderOwner) {
+	if _, err := ex.CancelOrder(mallory.Cancel(symETH, order.ID)); !errors.Is(err, ErrNotOrderOwner) {
 		t.Fatalf("cancel by non-owner: err = %v, want ErrNotOrderOwner", err)
 	}
 
 	// Mallory claims to be Alice but can't produce her signature.
 	msg := signing.Cancel{Maker: alice.Addr, Symbol: symETH, OrderID: order.ID}
-	if _, err := ex.cancelOrder(msg, mallory.Sign(msg.TypedData(testChainID))); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := ex.CancelOrder(msg, mallory.Sign(msg.TypedData(testChainID))); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("forged cancel: err = %v, want ErrInvalidSignature", err)
 	}
 
@@ -365,7 +372,7 @@ func TestConcurrentOrdersSameSymbol(t *testing.T) {
 			if isBid {
 				price = uint64(2_999 - i)
 			}
-			if _, _, _, err := ex.placeLimitOrder(alice.Limit(isBid, price, 1, symETH)); err != nil {
+			if _, err := ex.PlaceLimitOrder(alice.Limit(isBid, price, 1, symETH)); err != nil {
 				t.Errorf("placeLimitOrder: %v", err)
 			}
 		}(i)
@@ -388,13 +395,13 @@ func TestOrderBookReadDuringWrites(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
-			ex.placeLimitOrder(alice.Limit(i%2 == 0, uint64(1_000+i%7*10), 1, symETH))
+			ex.PlaceLimitOrder(alice.Limit(i%2 == 0, uint64(1_000+i%7*10), 1, symETH))
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
-			if _, err := ex.getOrderBook(symETH); err != nil {
+			if _, err := ex.OrderBook(symETH); err != nil {
 				t.Errorf("getOrderBook: %v", err)
 			}
 		}
@@ -407,10 +414,11 @@ func TestSelfTradeIsPrevented(t *testing.T) {
 	alice := signingtest.NewTrader(t, testChainID)
 
 	ask, err := func() (uint64, error) {
-		_, o, _, err := ex.placeLimitOrder(alice.Limit(false, 3_500, 10, symETH))
+		oPlaced, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 10, symETH))
 		if err != nil {
 			return 0, err
 		}
+		o := oPlaced.Order
 		return o.ID, nil
 	}()
 	if err != nil {
@@ -418,17 +426,18 @@ func TestSelfTradeIsPrevented(t *testing.T) {
 	}
 
 	// Alice's buy crosses her own ask: no trade, her ask is cancelled (and reported), the buy rests.
-	matches, _, cancelled, err := ex.placeLimitOrder(alice.Limit(true, 3_600, 10, symETH))
+	placed, err := ex.PlaceLimitOrder(alice.Limit(true, 3_600, 10, symETH))
 	if err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
+	matches, cancelled := placed.Matches, placed.Cancelled
 	if len(matches) != 0 {
 		t.Fatalf("matches = %+v, want none (self-trade)", matches)
 	}
 	if len(cancelled) != 1 || cancelled[0].ID != ask {
 		t.Fatalf("cancelled = %+v, want alice's ask %d", cancelled, ask)
 	}
-	if _, err := ex.cancelOrder(alice.Cancel(symETH, ask)); !errors.Is(err, ErrOrderNotFound) {
+	if _, err := ex.CancelOrder(alice.Cancel(symETH, ask)); !errors.Is(err, ErrOrderNotFound) {
 		t.Fatalf("own ask should be gone: cancel err = %v, want ErrOrderNotFound", err)
 	}
 	if bids, asks := bookVolume(t, ex, symETH); bids != 10 || asks != 0 {
@@ -450,12 +459,12 @@ func TestOrderBookHidesOrdersOnceExpired(t *testing.T) {
 	}{{alice, true, 3_000}, {bob, false, 4_000}} {
 		msg := tr.trader.NewOrder(tr.isBid, 10, tr.price, symETH)
 		msg.Expiry = uint64(start.Add(10 * time.Second).Unix())
-		if _, _, _, err := ex.placeLimitOrder(msg, tr.trader.Sign(msg.TypedData(testChainID))); err != nil {
+		if _, err := ex.PlaceLimitOrder(msg, tr.trader.Sign(msg.TypedData(testChainID))); err != nil {
 			t.Fatalf("placeLimitOrder: %v", err)
 		}
 	}
 
-	book, err := ex.getOrderBook(symETH)
+	book, err := ex.OrderBook(symETH)
 	if err != nil {
 		t.Fatalf("getOrderBook: %v", err)
 	}
@@ -464,7 +473,7 @@ func TestOrderBookHidesOrdersOnceExpired(t *testing.T) {
 	}
 
 	ex.now = func() time.Time { return start.Add(time.Minute) }
-	book, err = ex.getOrderBook(symETH)
+	book, err = ex.OrderBook(symETH)
 	if err != nil {
 		t.Fatalf("getOrderBook: %v", err)
 	}

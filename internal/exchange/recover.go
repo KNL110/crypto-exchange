@@ -87,7 +87,7 @@ func (e *Exchange) replay(rec wal.Record) error {
 		}
 		// A market order that found too little liquidity was logged and then
 		// rejected live; it is rejected the same way here.
-		if _, _, _, err := e.placeOrder(msg, sig, market, rp); err != nil && !errors.Is(err, ErrInsufficientLiquidity) {
+		if _, err := e.placeOrder(msg, sig, market, rp); err != nil && !errors.Is(err, ErrInsufficientLiquidity) {
 			return fmt.Errorf("record seq=%d: %w", rec.Seq, err)
 		}
 

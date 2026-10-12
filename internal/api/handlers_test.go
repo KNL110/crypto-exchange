@@ -1,14 +1,32 @@
-package exchange
+package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/labstack/echo/v5"
+
+	"github.com/knl110/crypto-exchange/internal/exchange"
 )
+
+func newTestExchange(t *testing.T) *exchange.Exchange {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	ex, err := exchange.NewExchange(hex.EncodeToString(crypto.FromECDSA(key)), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("NewExchange: %v", err)
+	}
+	return ex
+}
 
 func newTestServer(t *testing.T) *echo.Echo {
 	t.Helper()

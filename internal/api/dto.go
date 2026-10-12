@@ -1,10 +1,11 @@
-package exchange
+package api
 
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
 
+	"github.com/knl110/crypto-exchange/internal/exchange"
 	"github.com/knl110/crypto-exchange/internal/signing"
 	"github.com/knl110/crypto-exchange/internal/symbol"
 )
@@ -108,17 +109,17 @@ func newMatchedOrderResponse(m matchengine.MatchedOrder) matchedOrderResponse {
 	}
 }
 
-func newPlaceOrderResponse(order *matchengine.Order, symbol symbol.Symbol, matches *[]matchengine.MatchedOrder, cancelled []*matchengine.Order) placeOrderResponse {
+func newPlaceOrderResponse(placed exchange.Placed, sym symbol.Symbol) placeOrderResponse {
 	res := placeOrderResponse{
-		Order:     newOrderResponse(order, symbol),
-		Matches:   make([]matchedOrderResponse, 0, len(*matches)),
-		Cancelled: make([]orderResponse, 0, len(cancelled)),
+		Order:     newOrderResponse(placed.Order, sym),
+		Matches:   make([]matchedOrderResponse, 0, len(placed.Matches)),
+		Cancelled: make([]orderResponse, 0, len(placed.Cancelled)),
 	}
-	for i := range *matches {
-		res.Matches = append(res.Matches, newMatchedOrderResponse((*matches)[i]))
+	for _, m := range placed.Matches {
+		res.Matches = append(res.Matches, newMatchedOrderResponse(m))
 	}
-	for _, o := range cancelled {
-		res.Cancelled = append(res.Cancelled, newOrderResponse(o, symbol))
+	for _, o := range placed.Cancelled {
+		res.Cancelled = append(res.Cancelled, newOrderResponse(o, sym))
 	}
 	return res
 }
@@ -138,16 +139,23 @@ type limitResponse struct {
 	Orders       []orderResponse `json:"orders"`
 }
 
-func newLimitResponse(lim *matchengine.Limit, symbol symbol.Symbol) limitResponse {
+func newLimitResponse(level exchange.LevelSnapshot, sym symbol.Symbol) limitResponse {
 	res := limitResponse{
-		Price:        lim.Price,
-		TotalVolumne: lim.TotalVolume,
-		TotalOrders:  lim.Len,
-		Orders:       make([]orderResponse, 0, lim.Len),
+		Price:        level.Price,
+		TotalVolumne: level.TotalVolume,
+		TotalOrders:  uint64(len(level.Orders)),
+		Orders:       make([]orderResponse, 0, len(level.Orders)),
 	}
-	orders := lim.Orders()
-	for i := range orders {
-		res.Orders = append(res.Orders, newOrderResponse(orders[i], symbol))
+	for _, o := range level.Orders {
+		res.Orders = append(res.Orders, orderResponse{
+			Id:     o.ID,
+			Maker:  o.Maker.Hex(),
+			Symbol: string(sym),
+			Side:   side(o.IsBid),
+			Size:   o.Size,
+			Filled: o.Filled,
+			Price:  level.Price,
+		})
 	}
 	return res
 }
@@ -158,17 +166,17 @@ type orderBookResponse struct {
 	Asks   []limitResponse `json:"asks"`
 }
 
-func newOrderBookResponse(book *matchengine.OrderBook, symbol symbol.Symbol) orderBookResponse {
+func newOrderBookResponse(book exchange.BookSnapshot) orderBookResponse {
 	res := orderBookResponse{
-		Symbol: string(symbol),
-		Bids:   make([]limitResponse, 0, len(book.BidLimits)),
-		Asks:   make([]limitResponse, 0, len(book.AskLimits)),
+		Symbol: string(book.Symbol),
+		Bids:   make([]limitResponse, 0, len(book.Bids)),
+		Asks:   make([]limitResponse, 0, len(book.Asks)),
 	}
-	for _, lim := range book.Bids() {
-		res.Bids = append(res.Bids, newLimitResponse(lim, symbol))
+	for _, level := range book.Bids {
+		res.Bids = append(res.Bids, newLimitResponse(level, book.Symbol))
 	}
-	for _, lim := range book.Asks() {
-		res.Asks = append(res.Asks, newLimitResponse(lim, symbol))
+	for _, level := range book.Asks {
+		res.Asks = append(res.Asks, newLimitResponse(level, book.Symbol))
 	}
 	return res
 }

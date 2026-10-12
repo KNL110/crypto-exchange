@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/knl110/crypto-exchange/internal/api"
 	"github.com/knl110/crypto-exchange/internal/config"
 	"github.com/knl110/crypto-exchange/internal/exchange"
 	"github.com/knl110/crypto-exchange/internal/logging"
@@ -37,7 +38,7 @@ func main() {
 		}
 	}()
 
-	app := newApplication(cfg, exchange.NewHandler(ex))
+	app := newApplication(cfg, api.NewHandler(ex))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

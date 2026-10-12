@@ -141,17 +141,27 @@ func (e *Exchange) releaseNonce(maker common.Address, nonce uint64) {
 	delete(e.usedNonces[maker], nonce)
 }
 
-// placeLimitOrder trades the order against the book as far as its limit price
-// allows, then rests whatever is left. It returns the fills (possibly none),
-// a snapshot of the order, and the maker's own resting orders that self-trade
-// prevention cancelled.
-func (e *Exchange) placeLimitOrder(msg signing.Order, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+// Placed is the outcome of placing an order.
+type Placed struct {
+	// Order is a snapshot of the order after matching: Size is what is
+	// still unfilled (and resting, for a limit order), Filled what traded.
+	Order *matchengine.Order
+	// Matches is every fill, best price first.
+	Matches []matchengine.MatchedOrder
+	// Cancelled lists the maker's own resting orders that self-trade
+	// prevention removed instead of trading against.
+	Cancelled []*matchengine.Order
+}
+
+// PlaceLimitOrder trades a signed limit order against the book as far as its
+// limit price allows, then rests whatever is left.
+func (e *Exchange) PlaceLimitOrder(msg signing.Order, sig []byte) (Placed, error) {
 	return e.placeOrder(msg, sig, false, nil)
 }
 
-// placeMarketOrder fills the whole order now, never past its signed worst
-// price, or fails with ErrInsufficientLiquidity and changes nothing.
-func (e *Exchange) placeMarketOrder(msg signing.Order, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+// PlaceMarketOrder fills the whole signed market order now, never past its
+// worst price, or fails with ErrInsufficientLiquidity and changes nothing.
+func (e *Exchange) PlaceMarketOrder(msg signing.Order, sig []byte) (Placed, error) {
 	return e.placeOrder(msg, sig, true, nil)
 }
 
@@ -159,13 +169,13 @@ func (e *Exchange) placeMarketOrder(msg signing.Order, sig []byte) ([]matchengin
 // replayed order goes through exactly the same checks and matching.
 //
 // TODO:consider the performance impact of copying the order struct in all these services
-func (e *Exchange) placeOrder(msg signing.Order, sig []byte, market bool, rp *replayed) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+func (e *Exchange) placeOrder(msg signing.Order, sig []byte, market bool, rp *replayed) (Placed, error) {
 	op, action := "PlaceLimitOrder (Exchange)", wal.ActionPlaceLimit
 	if market {
 		op, action = "PlaceMarketOrder (Exchange)", wal.ActionPlaceMarket
 	}
-	fail := func(err error) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
-		return nil, nil, nil, fmt.Errorf("%s: %w", op, err)
+	fail := func(err error) (Placed, error) {
+		return Placed{}, fmt.Errorf("%s: %w", op, err)
 	}
 
 	if msg.IsMarket != market {
@@ -236,10 +246,12 @@ func (e *Exchange) placeOrder(msg signing.Order, sig []byte, market bool, rp *re
 		return fail(err)
 	}
 	snap := *order
-	return matched, &snap, cancelled, nil
+	return Placed{Order: &snap, Matches: matched, Cancelled: cancelled}, nil
 }
 
-func (e *Exchange) cancelOrder(msg signing.Cancel, sig []byte) (*matchengine.Order, error) {
+// CancelOrder cancels one of the maker's resting orders. The cancel must be
+// signed by the order's maker.
+func (e *Exchange) CancelOrder(msg signing.Cancel, sig []byte) (*matchengine.Order, error) {
 	return e.cancel(msg, sig, nil)
 }
 
@@ -290,16 +302,56 @@ func (e *Exchange) cancel(msg signing.Cancel, sig []byte, rp *replayed) (*matche
 	return order, nil
 }
 
-// getOrderBook returns a snapshot of sym's book. It is built while the lock
-// is held: the book's levels and orders are shared, mutable state, so reading
-// them after unlocking would race with incoming orders.
-func (e *Exchange) getOrderBook(sym symbol.Symbol) (orderBookResponse, error) {
+// BookSnapshot is a copy of one symbol's order book, taken under its lock,
+// so it is safe to read after the lock is released.
+type BookSnapshot struct {
+	Symbol symbol.Symbol
+	Bids   []LevelSnapshot // best (highest) price first
+	Asks   []LevelSnapshot // best (lowest) price first
+}
+
+// LevelSnapshot is one price level of a BookSnapshot.
+type LevelSnapshot struct {
+	Price       uint64
+	TotalVolume uint64
+	Orders      []OrderSnapshot // oldest first, the order they fill in
+}
+
+// OrderSnapshot is a resting order as of a BookSnapshot.
+type OrderSnapshot struct {
+	ID     uint64
+	Maker  common.Address
+	IsBid  bool
+	Size   uint64 // unfilled
+	Filled uint64
+	Expiry uint64
+}
+
+// OrderBook returns a snapshot of sym's book without expired orders. It is
+// built while the lock is held: the book's levels and orders are shared,
+// mutable state, so reading them after unlocking would race with incoming orders.
+func (e *Exchange) OrderBook(sym symbol.Symbol) (BookSnapshot, error) {
 	sb, err := e.symbolBook(sym)
 	if err != nil {
-		return orderBookResponse{}, fmt.Errorf("GetOrderBook (Exchange): %w", err)
+		return BookSnapshot{}, fmt.Errorf("GetOrderBook (Exchange): %w", err)
 	}
 	ob := sb.Lock(uint64(e.now().Unix()))
 	defer sb.Unlock()
 	ob.PurgeExpired()
-	return newOrderBookResponse(ob, sym), nil
+	return BookSnapshot{Symbol: sym, Bids: snapshotLevels(ob.Bids()), Asks: snapshotLevels(ob.Asks())}, nil
+}
+
+func snapshotLevels(limits []*matchengine.Limit) []LevelSnapshot {
+	levels := make([]LevelSnapshot, 0, len(limits))
+	for _, lim := range limits {
+		orders := lim.Orders()
+		level := LevelSnapshot{Price: lim.Price, TotalVolume: lim.TotalVolume, Orders: make([]OrderSnapshot, 0, len(orders))}
+		for _, o := range orders {
+			level.Orders = append(level.Orders, OrderSnapshot{
+				ID: o.ID, Maker: o.Maker, IsBid: o.IsBid, Size: o.Size, Filled: o.Filled, Expiry: o.Expiry,
+			})
+		}
+		levels = append(levels, level)
+	}
+	return levels
 }

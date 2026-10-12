@@ -12,18 +12,18 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/rs/zerolog/log"
 
+	"github.com/knl110/crypto-exchange/internal/api"
 	"github.com/knl110/crypto-exchange/internal/config"
-	"github.com/knl110/crypto-exchange/internal/exchange"
 	"github.com/knl110/crypto-exchange/internal/logging"
 )
 
 type application struct {
 	config   *config.Config
-	exchange *exchange.Handler
+	exchange *api.Handler
 	server   *http.Server
 }
 
-func newApplication(cfg *config.Config, exchangeHandler *exchange.Handler) *application {
+func newApplication(cfg *config.Config, exchangeHandler *api.Handler) *application {
 	return &application{
 		config:   cfg,
 		exchange: exchangeHandler,
@@ -52,10 +52,10 @@ func (app *application) mount() *echo.Echo {
 	// RequestID tags each request (X-Request-ID) so its log line can be traced.
 	e.Use(middleware.RequestID(), logging.RequestLoggerMiddleware(log.Logger))
 
-	api := e.Group("/api/v1")
-	api.GET("/healthz", app.exchange.Health)
+	v1 := e.Group("/api/v1")
+	v1.GET("/healthz", app.exchange.Health)
 
-	exchange.RegisterRoutes(api.Group("/exchange"), app.exchange)
+	api.RegisterRoutes(v1.Group("/exchange"), app.exchange)
 
 	return e
 }

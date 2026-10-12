@@ -25,11 +25,11 @@ func recovered(t *testing.T, path string, key []byte) *Exchange {
 	return ex
 }
 
-func allBooks(t *testing.T, ex *Exchange) map[symbol.Symbol]orderBookResponse {
+func allBooks(t *testing.T, ex *Exchange) map[symbol.Symbol]BookSnapshot {
 	t.Helper()
-	books := make(map[symbol.Symbol]orderBookResponse)
+	books := make(map[symbol.Symbol]BookSnapshot)
 	for _, sym := range symbol.Configured {
-		b, err := ex.getOrderBook(sym)
+		b, err := ex.OrderBook(sym)
 		if err != nil {
 			t.Fatalf("getOrderBook(%s): %v", sym, err)
 		}
@@ -50,23 +50,24 @@ func TestRecoverRebuildsOrderBooks(t *testing.T) {
 		}
 	}
 	// Resting orders on both sides of two symbols.
-	_, _, _, err := ex.placeLimitOrder(alice.Limit(false, 3_500, 10, symETH))
+	_, err := ex.PlaceLimitOrder(alice.Limit(false, 3_500, 10, symETH))
 	must(err)
-	_, _, _, err = ex.placeLimitOrder(alice.Limit(false, 3_600, 10, symETH))
+	_, err = ex.PlaceLimitOrder(alice.Limit(false, 3_600, 10, symETH))
 	must(err)
-	_, toCancel, _, err := ex.placeLimitOrder(bob.Limit(true, 3_000, 7, symETH))
+	toCancelPlaced, err := ex.PlaceLimitOrder(bob.Limit(true, 3_000, 7, symETH))
+	toCancel := toCancelPlaced.Order
 	must(err)
-	_, _, _, err = ex.placeLimitOrder(carol.Limit(true, 60_000, 2, symbol.Symbol("BTC")))
+	_, err = ex.PlaceLimitOrder(carol.Limit(true, 60_000, 2, symbol.Symbol("BTC")))
 	must(err)
 	// A crossing limit order (fills 10 @ 3500, 5 rest at 3550) and a market order.
-	_, _, _, err = ex.placeLimitOrder(bob.Limit(true, 3_550, 15, symETH))
+	_, err = ex.PlaceLimitOrder(bob.Limit(true, 3_550, 15, symETH))
 	must(err)
-	_, _, _, err = ex.placeMarketOrder(carol.Market(true, 4, 3_600, symETH))
+	_, err = ex.PlaceMarketOrder(carol.Market(true, 4, 3_600, symETH))
 	must(err)
 	// A cancel, and a market order that is logged but rejected for liquidity.
-	_, err = ex.cancelOrder(bob.Cancel(symETH, toCancel.ID))
+	_, err = ex.CancelOrder(bob.Cancel(symETH, toCancel.ID))
 	must(err)
-	if _, _, _, err := ex.placeMarketOrder(carol.Market(true, 1_000, 10_000, symETH)); !errors.Is(err, ErrInsufficientLiquidity) {
+	if _, err := ex.PlaceMarketOrder(carol.Market(true, 1_000, 10_000, symETH)); !errors.Is(err, ErrInsufficientLiquidity) {
 		t.Fatalf("placeMarketOrder: err = %v, want ErrInsufficientLiquidity", err)
 	}
 
@@ -84,7 +85,8 @@ func TestRecoverRebuildsOrderBooks(t *testing.T) {
 	}
 
 	// New orders continue after the recovered IDs and are logged too.
-	_, o, _, err := ex2.placeLimitOrder(alice.Limit(false, 3_700, 1, symETH))
+	oPlaced, err := ex2.PlaceLimitOrder(alice.Limit(false, 3_700, 1, symETH))
+	o := oPlaced.Order
 	must(err)
 	if o.ID <= lastID {
 		t.Fatalf("new order ID %d, want > %d", o.ID, lastID)
@@ -102,14 +104,14 @@ func TestRecoverRebuildsUsedNonces(t *testing.T) {
 
 	ex := recovered(t, path, nil)
 	msg, sig := alice.Limit(true, 3_000, 10, symETH)
-	if _, _, _, err := ex.placeLimitOrder(msg, sig); err != nil {
+	if _, err := ex.PlaceLimitOrder(msg, sig); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 	ex.Close()
 
 	// The same signed order replayed after a restart is still rejected.
 	ex2 := recovered(t, path, nil)
-	if _, _, _, err := ex2.placeLimitOrder(msg, sig); !errors.Is(err, ErrNonceUsed) {
+	if _, err := ex2.PlaceLimitOrder(msg, sig); !errors.Is(err, ErrNonceUsed) {
 		t.Fatalf("replayed order after restart: err = %v, want ErrNonceUsed", err)
 	}
 }
@@ -123,7 +125,7 @@ func TestRecoverReplaysAtOriginalTime(t *testing.T) {
 	ex.now = func() time.Time { return start }
 	msg := alice.NewOrder(true, 10, 3_000, symETH)
 	msg.Expiry = uint64(start.Add(10 * time.Second).Unix())
-	if _, _, _, err := ex.placeLimitOrder(msg, alice.Sign(msg.TypedData(testChainID))); err != nil {
+	if _, err := ex.PlaceLimitOrder(msg, alice.Sign(msg.TypedData(testChainID))); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 	ex.Close()
@@ -136,7 +138,7 @@ func TestRecoverReplaysAtOriginalTime(t *testing.T) {
 		t.Fatalf("Recover: %v", err)
 	}
 	defer ex2.Close()
-	if book, _ := ex2.getOrderBook(symETH); len(book.Bids) != 0 {
+	if book, _ := ex2.OrderBook(symETH); len(book.Bids) != 0 {
 		t.Fatalf("expired order still shown after recovery: %+v", book.Bids)
 	}
 }
@@ -146,7 +148,7 @@ func TestRecoverRejectsTamperedRecord(t *testing.T) {
 	alice := signingtest.NewTrader(t, testChainID)
 
 	ex := recovered(t, path, nil)
-	if _, _, _, err := ex.placeLimitOrder(alice.Limit(true, 3_000, 10, symETH)); err != nil {
+	if _, err := ex.PlaceLimitOrder(alice.Limit(true, 3_000, 10, symETH)); err != nil {
 		t.Fatalf("placeLimitOrder: %v", err)
 	}
 	ex.Close()
@@ -176,7 +178,7 @@ func TestRecoverWithHMACDetectsDeletedRecord(t *testing.T) {
 
 	ex := recovered(t, path, key)
 	for _, p := range []uint64{3_000, 3_100, 3_200} {
-		if _, _, _, err := ex.placeLimitOrder(alice.Limit(true, p, 10, symETH)); err != nil {
+		if _, err := ex.PlaceLimitOrder(alice.Limit(true, p, 10, symETH)); err != nil {
 			t.Fatalf("placeLimitOrder: %v", err)
 		}
 	}

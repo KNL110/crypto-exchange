@@ -85,10 +85,12 @@ func newOrderResponse(order *matchengine.Order, symbol Symbol) orderResponse {
 }
 
 // placeOrderResponse is returned for both limit and market orders: the order
-// after matching, plus every fill it made.
+// after matching, every fill it made, and the maker's own resting orders that
+// self-trade prevention cancelled.
 type placeOrderResponse struct {
-	Order   orderResponse          `json:"order"`
-	Matches []matchedOrderResponse `json:"matches"`
+	Order     orderResponse          `json:"order"`
+	Matches   []matchedOrderResponse `json:"matches"`
+	Cancelled []orderResponse        `json:"cancelled"`
 }
 
 type matchedOrderResponse struct {
@@ -103,13 +105,17 @@ func newMatchedOrderResponse(m matchengine.MatchedOrder) matchedOrderResponse {
 	}
 }
 
-func newPlaceOrderResponse(order *matchengine.Order, symbol Symbol, matches *[]matchengine.MatchedOrder) placeOrderResponse {
+func newPlaceOrderResponse(order *matchengine.Order, symbol Symbol, matches *[]matchengine.MatchedOrder, cancelled []*matchengine.Order) placeOrderResponse {
 	res := placeOrderResponse{
-		Order:   newOrderResponse(order, symbol),
-		Matches: make([]matchedOrderResponse, 0, len(*matches)),
+		Order:     newOrderResponse(order, symbol),
+		Matches:   make([]matchedOrderResponse, 0, len(*matches)),
+		Cancelled: make([]orderResponse, 0, len(cancelled)),
 	}
 	for i := range *matches {
 		res.Matches = append(res.Matches, newMatchedOrderResponse((*matches)[i]))
+	}
+	for _, o := range cancelled {
+		res.Cancelled = append(res.Cancelled, newOrderResponse(o, symbol))
 	}
 	return res
 }

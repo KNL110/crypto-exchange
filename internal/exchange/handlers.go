@@ -53,11 +53,11 @@ func (h *Handler) PlaceLimitOrder(c *echo.Context) error {
 	}
 	symbol := Symbol(req.Symbol)
 
-	matches, order, err := h.ex.placeLimitOrder(req.message(), req.Signature)
+	matches, order, cancelled, err := h.ex.placeLimitOrder(req.message(), req.Signature)
 	if err != nil {
 		return h.mapError(c,err)
 	}
-	return c.JSON(http.StatusCreated, newPlaceOrderResponse(order, symbol, &matches))
+	return c.JSON(http.StatusCreated, newPlaceOrderResponse(order, symbol, &matches, cancelled))
 }
 
 func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
@@ -68,11 +68,11 @@ func (h *Handler) PlaceMarketOrder(c *echo.Context) error {
 	}
 	symbol := Symbol(req.Symbol)
 
-	matches,order, err := h.ex.placeMarketOrder(req.message(), req.Signature)
+	matches, order, cancelled, err := h.ex.placeMarketOrder(req.message(), req.Signature)
 	if err != nil {
 		return h.mapError(c,err)
 	}
-	return c.JSON(http.StatusCreated, newPlaceOrderResponse(order,symbol,&matches))
+	return c.JSON(http.StatusCreated, newPlaceOrderResponse(order, symbol, &matches, cancelled))
 }
 
 func (h *Handler) CancelOrder(c *echo.Context) error {

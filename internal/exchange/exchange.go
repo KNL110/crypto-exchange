@@ -111,25 +111,26 @@ func (e *Exchange) releaseNonce(maker common.Address, nonce uint64) {
 
 // TODO:consider the performance impact of copying the order struct in all these services
 // placeLimitOrder trades the order against the book as far as its limit price
-// allows, then rests whatever is left. It returns the fills (possibly none)
-// and a snapshot of the order.
-func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
+// allows, then rests whatever is left. It returns the fills (possibly none),
+// a snapshot of the order, and the maker's own resting orders that self-trade
+// prevention cancelled.
+func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
 	if msg.IsMarket {
-		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrOrderTypeMismatch)
+		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrOrderTypeMismatch)
 	}
 	if msg.Size == 0 {
-		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidSize)
+		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidSize)
 	}
 	if msg.Price == 0 {
-		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidPrice)
+		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", ErrInvalidPrice)
 	}
 
 	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
-		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
 	if err := e.authorizeOrder(msg, sig); err != nil {
-		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
 
 	sb.mu.Lock()
@@ -139,34 +140,34 @@ func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) ([]matchengine.
 	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 	order.Expiry = msg.Expiry
 
-	matched, _, err := sb.book.PlaceLimitOrder(order, msg.Price)
+	matched, cancelled, err := sb.book.PlaceLimitOrder(order, msg.Price)
 	if err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
-		return nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
+		return nil, nil, nil, fmt.Errorf("PlaceLimitOrder (Exchange): %w", err)
 	}
 	snap := *order
-	return matched, &snap, nil
+	return matched, &snap, cancelled, nil
 }
 
-func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, error) {
+func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
 	if !msg.IsMarket {
-		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrOrderTypeMismatch)
+		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrOrderTypeMismatch)
 	}
 	if msg.Size == 0 {
-		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidSize)
+		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidSize)
 	}
 	// Price is the worst price the maker accepts; without one a market
 	// order could fill at any price.
 	if msg.Price == 0 {
-		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidPrice)
+		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", ErrInvalidPrice)
 	}
 
 	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
-		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
+		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
 	}
 	if err := e.authorizeOrder(msg, sig); err != nil {
-		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
+		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
 	}
 
 	sb.mu.Lock()
@@ -175,16 +176,16 @@ func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine
 	id := e.nextOrderID.Add(1)
 	order := matchengine.NewOrder(id, msg.IsBid, msg.Size, msg.Maker)
 
-	matched, _, err := sb.book.PlaceMarketOrder(order, msg.Price)
+	matched, cancelled, err := sb.book.PlaceMarketOrder(order, msg.Price)
 	if err != nil {
 		e.releaseNonce(msg.Maker, msg.Nonce)
 		if errors.Is(err, matchengine.ErrInsufficientLiquidity) {
 			err = ErrInsufficientLiquidity
 		}
-		return nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
+		return nil, nil, nil, fmt.Errorf("PlaceMarketOrder (Exchange): %w", err)
 	}
 	snap := *order
-	return matched, &snap, nil
+	return matched, &snap, cancelled, nil
 }
 
 func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Order, error) {

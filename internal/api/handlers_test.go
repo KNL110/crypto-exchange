@@ -7,12 +7,14 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/labstack/echo/v5"
 
 	"github.com/knl110/crypto-exchange/internal/exchange"
+	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
 func newTestExchange(t *testing.T) *exchange.Exchange {
@@ -35,53 +37,79 @@ func newTestServer(t *testing.T) *echo.Echo {
 	return e
 }
 
-func TestOrderBookFromQueryString(t *testing.T) {
+// get requests path and decodes a 200 JSON response into out.
+func get(t *testing.T, e *echo.Echo, path string, out any) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	if rec.Code == http.StatusOK && out != nil {
+		if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+			t.Fatalf("GET %s: decode %s: %v", path, rec.Body, err)
+		}
+	}
+	return rec.Code
+}
+
+func symbolsOf(books []orderBookResponse) []string {
+	syms := make([]string, 0, len(books))
+	for _, b := range books {
+		syms = append(syms, b.Symbol)
+	}
+	return syms
+}
+
+func TestOrderBookBySymbolPath(t *testing.T) {
 	e := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/exchange/orderbook?symbol=ETH", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	var book orderBookResponse
+	if code := get(t, e, "/api/v1/exchange/orderbooks/ETH", &book); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
 	}
-	var got orderBookResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
+	if book.Symbol != "ETH" {
+		t.Fatalf("symbol = %q, want ETH", book.Symbol)
 	}
-	if got.Symbol != "ETH" {
-		t.Fatalf("symbol = %q, want ETH", got.Symbol)
+	if code := get(t, e, "/api/v1/exchange/orderbooks/DOGE", nil); code != http.StatusNotFound {
+		t.Fatalf("unknown symbol: status = %d, want 404", code)
 	}
 }
 
-func TestManyOrderBooksFromQueryString(t *testing.T) {
+func TestOrderBooksForCommaSeparatedSymbols(t *testing.T) {
 	e := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/exchange/orderbooks?symbols=ETH&symbols=BTC", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	var books []orderBookResponse
+	if code := get(t, e, "/api/v1/exchange/orderbooks?symbols=BTC,ETH", &books); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if got := symbolsOf(books); !reflect.DeepEqual(got, []string{"BTC", "ETH"}) {
+		t.Fatalf("symbols = %v, want [BTC ETH] in the order asked", got)
+	}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	// Blanks and duplicates are ignored.
+	if code := get(t, e, "/api/v1/exchange/orderbooks?symbols=ETH,%20,ETH,", &books); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
 	}
-	var got map[string]orderBookResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
+	if got := symbolsOf(books); !reflect.DeepEqual(got, []string{"ETH"}) {
+		t.Fatalf("symbols = %v, want [ETH]", got)
 	}
-	if len(got) != 2 || got["ETH"].Symbol != "ETH" || got["BTC"].Symbol != "BTC" {
-		t.Fatalf("books = %+v, want ETH and BTC", got)
+
+	if code := get(t, e, "/api/v1/exchange/orderbooks?symbols=ETH,DOGE", nil); code != http.StatusNotFound {
+		t.Fatalf("one unknown symbol: status = %d, want 404", code)
 	}
 }
 
-func TestOrderBookUnknownSymbolFromQueryString(t *testing.T) {
+func TestOrderBooksWithoutSymbolsReturnsAll(t *testing.T) {
 	e := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/exchange/orderbook?symbol=DOGE", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404, body %s", rec.Code, rec.Body)
+	var books []orderBookResponse
+	if code := get(t, e, "/api/v1/exchange/orderbooks", &books); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	want := make([]string, 0, len(symbol.Configured))
+	for _, s := range symbol.Configured {
+		want = append(want, string(s))
+	}
+	if got := symbolsOf(books); !reflect.DeepEqual(got, want) {
+		t.Fatalf("symbols = %v, want every configured symbol %v", got, want)
 	}
 }
 

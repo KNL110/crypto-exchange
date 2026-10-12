@@ -5,6 +5,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -91,36 +92,48 @@ func (h *Handler) CancelOrder(c *echo.Context) error {
 	return c.JSON(http.StatusOK, newOrderResponse(order, symbol.Symbol(req.Symbol)))
 }
 
+// OrderBook serves GET /orderbooks/:symbol: one symbol's book.
 func (h *Handler) OrderBook(c *echo.Context) error {
-	var req orderBookRequest
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
-	}
-	book, err := h.ex.OrderBook(symbol.Symbol(req.Symbol))
+	book, err := h.ex.OrderBook(symbol.Symbol(c.Param("symbol")))
 	if err != nil {
 		return h.mapError(c, err)
 	}
 	return c.JSON(http.StatusOK, newOrderBookResponse(book))
 }
 
-func (h *Handler) ManyOrderBooks(c *echo.Context) error {
-	var req ManyOrderBookRequest
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, newErrorResponse(err))
+// OrderBooks serves GET /orderbooks?symbols=ETH,BTC: the books for a
+// comma-separated list of symbols, in the order given, or for every
+// configured symbol when the list is omitted. Any unknown symbol is a 404.
+func (h *Handler) OrderBooks(c *echo.Context) error {
+	syms := parseSymbols(c.QueryParam("symbols"))
+	if len(syms) == 0 {
+		syms = h.ex.Symbols()
 	}
 
-	orderBooks := make(map[string]orderBookResponse)
-	for _, symStr := range req.Symbols {
-		book, err := h.ex.OrderBook(symbol.Symbol(symStr))
+	books := make([]orderBookResponse, 0, len(syms))
+	for _, sym := range syms {
+		book, err := h.ex.OrderBook(sym)
 		if err != nil {
 			return h.mapError(c, err)
 		}
-		orderBooks[symStr] = newOrderBookResponse(book)
+		books = append(books, newOrderBookResponse(book))
 	}
+	return c.JSON(http.StatusOK, books)
+}
 
-	return c.JSON(http.StatusOK, orderBooks)
+// parseSymbols splits a comma-separated list, dropping blanks and duplicates.
+func parseSymbols(list string) []symbol.Symbol {
+	var syms []symbol.Symbol
+	seen := make(map[symbol.Symbol]bool)
+	for _, part := range strings.Split(list, ",") {
+		sym := symbol.Symbol(strings.TrimSpace(part))
+		if sym == "" || seen[sym] {
+			continue
+		}
+		seen[sym] = true
+		syms = append(syms, sym)
+	}
+	return syms
 }
 
 // Health reports server status along with the configured trading symbols.

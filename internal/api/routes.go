@@ -6,8 +6,8 @@ import (
 
 func RegisterRoutes(g *echo.Group, h *Handler) {
 
-	g.GET("/orderbook", h.OrderBook)
-	g.GET("/orderbooks", h.ManyOrderBooks)
+	g.GET("/orderbooks", h.OrderBooks)
+	g.GET("/orderbooks/:symbol", h.OrderBook)
 	g.POST("/orders/limit", h.PlaceLimitOrder)
 	g.POST("/orders/market", h.PlaceMarketOrder)
 	g.DELETE("/orders/cancel", h.CancelOrder)

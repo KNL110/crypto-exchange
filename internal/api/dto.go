@@ -52,16 +52,6 @@ func (r cancelOrderRequest) message() signing.Cancel {
 	}
 }
 
-// orderBookRequest and ManyOrderBookRequest are read from the query string
-// (?symbol=ETH, ?symbols=ETH&symbols=BTC): browsers can't send a body with GET.
-type orderBookRequest struct {
-	Symbol string `query:"symbol" json:"symbol"`
-}
-
-type ManyOrderBookRequest struct {
-	Symbols []string `query:"symbols" json:"symbols"`
-}
-
 type orderResponse struct {
 	Id     uint64 `json:"id"`
 	Maker  string `json:"maker"`

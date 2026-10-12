@@ -80,11 +80,13 @@ func (e *Exchange) symbolBook(sym symbol.Symbol) (*symbol.Book, error) {
 	return sb, nil
 }
 
-// Symbols returns the configured trading symbols.
+// Symbols returns the traded symbols, in configured order.
 func (e *Exchange) Symbols() []symbol.Symbol {
 	symbols := make([]symbol.Symbol, 0, len(e.orderBooks))
-	for s := range e.orderBooks {
-		symbols = append(symbols, s)
+	for _, s := range symbol.Configured {
+		if _, ok := e.orderBooks[s]; ok {
+			symbols = append(symbols, s)
+		}
 	}
 	return symbols
 }

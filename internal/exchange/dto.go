@@ -5,6 +5,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
 
+	"github.com/knl110/crypto-exchange/internal/signing"
 	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
@@ -22,8 +23,8 @@ type signedOrderRequest struct {
 	Signature hexutil.Bytes  `json:"signature"`
 }
 
-func (r signedOrderRequest) message() OrderMessage {
-	return OrderMessage{
+func (r signedOrderRequest) message() signing.Order {
+	return signing.Order{
 		Maker:    r.Maker,
 		Symbol:   symbol.Symbol(r.Symbol),
 		IsBid:    r.IsBid,
@@ -42,8 +43,8 @@ type cancelOrderRequest struct {
 	Signature hexutil.Bytes  `json:"signature"`
 }
 
-func (r cancelOrderRequest) message() CancelMessage {
-	return CancelMessage{
+func (r cancelOrderRequest) message() signing.Cancel {
+	return signing.Cancel{
 		Maker:   r.Maker,
 		Symbol:  symbol.Symbol(r.Symbol),
 		OrderID: r.OrderID,

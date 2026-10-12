@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	matchengine "github.com/knl110/crypto-exchange/internal/MatchEngine"
+	"github.com/knl110/crypto-exchange/internal/signing"
 	"github.com/knl110/crypto-exchange/internal/symbol"
 	"github.com/knl110/crypto-exchange/internal/wal"
 )
@@ -108,8 +109,8 @@ func (e *Exchange) logAction(rp *replayed, rec wal.Record) error {
 
 // authorizeOrder checks the maker signed msg, that it has not expired at ts,
 // and reserves its nonce. Call releaseNonce if the order is then not accepted.
-func (e *Exchange) authorizeOrder(msg OrderMessage, sig []byte, ts int64) error {
-	signer, err := recoverSigner(msg.typedData(e.chainID), sig)
+func (e *Exchange) authorizeOrder(msg signing.Order, sig []byte, ts int64) error {
+	signer, err := signing.RecoverSigner(msg.TypedData(e.chainID), sig)
 	if err != nil {
 		return err
 	}
@@ -144,13 +145,13 @@ func (e *Exchange) releaseNonce(maker common.Address, nonce uint64) {
 // allows, then rests whatever is left. It returns the fills (possibly none),
 // a snapshot of the order, and the maker's own resting orders that self-trade
 // prevention cancelled.
-func (e *Exchange) placeLimitOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+func (e *Exchange) placeLimitOrder(msg signing.Order, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
 	return e.placeOrder(msg, sig, false, nil)
 }
 
 // placeMarketOrder fills the whole order now, never past its signed worst
 // price, or fails with ErrInsufficientLiquidity and changes nothing.
-func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+func (e *Exchange) placeMarketOrder(msg signing.Order, sig []byte) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
 	return e.placeOrder(msg, sig, true, nil)
 }
 
@@ -158,7 +159,7 @@ func (e *Exchange) placeMarketOrder(msg OrderMessage, sig []byte) ([]matchengine
 // replayed order goes through exactly the same checks and matching.
 //
 // TODO:consider the performance impact of copying the order struct in all these services
-func (e *Exchange) placeOrder(msg OrderMessage, sig []byte, market bool, rp *replayed) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
+func (e *Exchange) placeOrder(msg signing.Order, sig []byte, market bool, rp *replayed) ([]matchengine.MatchedOrder, *matchengine.Order, []*matchengine.Order, error) {
 	op, action := "PlaceLimitOrder (Exchange)", wal.ActionPlaceLimit
 	if market {
 		op, action = "PlaceMarketOrder (Exchange)", wal.ActionPlaceMarket
@@ -238,17 +239,17 @@ func (e *Exchange) placeOrder(msg OrderMessage, sig []byte, market bool, rp *rep
 	return matched, &snap, cancelled, nil
 }
 
-func (e *Exchange) cancelOrder(msg CancelMessage, sig []byte) (*matchengine.Order, error) {
+func (e *Exchange) cancelOrder(msg signing.Cancel, sig []byte) (*matchengine.Order, error) {
 	return e.cancel(msg, sig, nil)
 }
 
 // cancel is shared by live cancels (rp == nil) and WAL replay.
-func (e *Exchange) cancel(msg CancelMessage, sig []byte, rp *replayed) (*matchengine.Order, error) {
+func (e *Exchange) cancel(msg signing.Cancel, sig []byte, rp *replayed) (*matchengine.Order, error) {
 	sb, err := e.symbolBook(msg.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}
-	signer, err := recoverSigner(msg.typedData(e.chainID), sig)
+	signer, err := signing.RecoverSigner(msg.TypedData(e.chainID), sig)
 	if err != nil {
 		return nil, fmt.Errorf("CancelOrder (Exchange): %w", err)
 	}

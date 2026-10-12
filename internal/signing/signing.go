@@ -1,6 +1,10 @@
-package exchange
+// Package signing defines what makers sign: EIP-712 typed data for orders
+// and cancels, and recovering the signer from a signature. A wallet signs
+// with eth_signTypedData_v4; the server never holds user keys.
+package signing
 
 import (
+	"errors"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -10,10 +14,10 @@ import (
 	"github.com/knl110/crypto-exchange/internal/symbol"
 )
 
-// Orders and cancels are EIP-712 typed data. A wallet signs them with
-// eth_signTypedData_v4; the server recovers the signer and checks it is the
-// maker. The server never holds user keys.
-//
+// ErrInvalidSignature means a signature is malformed or was not made by the
+// address that claims to have signed.
+var ErrInvalidSignature = errors.New("exchange: signature does not match maker")
+
 // TODO: add verifyingContract to the domain once the settlement contract is deployed.
 const (
 	domainName    = "CryptoExchange"
@@ -43,11 +47,11 @@ var eip712Types = apitypes.Types{
 	},
 }
 
-// OrderMessage is the order a maker signs. Price is a whole number of ticks:
+// Order is the order a maker signs. Price is a whole number of ticks:
 // a limit order's limit price, or for a market order the worst price the maker
 // accepts. IsMarket is signed so one kind can't be submitted as the other.
 // Expiry is a unix timestamp in seconds.
-type OrderMessage struct {
+type Order struct {
 	Maker    common.Address
 	Symbol   symbol.Symbol
 	IsBid    bool
@@ -58,8 +62,8 @@ type OrderMessage struct {
 	Expiry   uint64
 }
 
-// CancelMessage is what a maker signs to cancel one of their resting orders.
-type CancelMessage struct {
+// Cancel is what a maker signs to cancel one of their resting orders.
+type Cancel struct {
 	Maker   common.Address
 	Symbol  symbol.Symbol
 	OrderID uint64
@@ -77,7 +81,8 @@ func u256(v uint64) *big.Int {
 	return new(big.Int).SetUint64(v)
 }
 
-func (m OrderMessage) typedData(chainID *big.Int) apitypes.TypedData {
+// TypedData is the EIP-712 message a wallet signs for this order on chainID.
+func (m Order) TypedData(chainID *big.Int) apitypes.TypedData {
 	return apitypes.TypedData{
 		Types:       eip712Types,
 		PrimaryType: "Order",
@@ -95,7 +100,8 @@ func (m OrderMessage) typedData(chainID *big.Int) apitypes.TypedData {
 	}
 }
 
-func (m CancelMessage) typedData(chainID *big.Int) apitypes.TypedData {
+// TypedData is the EIP-712 message a wallet signs for this cancel on chainID.
+func (m Cancel) TypedData(chainID *big.Int) apitypes.TypedData {
 	return apitypes.TypedData{
 		Types:       eip712Types,
 		PrimaryType: "Cancel",
@@ -108,9 +114,9 @@ func (m CancelMessage) typedData(chainID *big.Int) apitypes.TypedData {
 	}
 }
 
-// recoverSigner returns the address that produced sig over the typed data.
+// RecoverSigner returns the address that produced sig over the typed data.
 // It accepts both v = 0/1 and the wallet-style v = 27/28.
-func recoverSigner(td apitypes.TypedData, sig []byte) (common.Address, error) {
+func RecoverSigner(td apitypes.TypedData, sig []byte) (common.Address, error) {
 	if len(sig) != crypto.SignatureLength {
 		return common.Address{}, ErrInvalidSignature
 	}
